@@ -9,11 +9,16 @@ ARG HF_TOKEN=''
 
 RUN apt update && apt-get -y install git wget \
     python3.10 python3.10-venv python3-pip \
-    build-essential libgl-dev libglib2.0-0 vim
+    build-essential libgl-dev libglib2.0-0 vim \
+    ffmpeg
 RUN ln -s /usr/bin/python3.10 /usr/bin/python
 
 RUN useradd -ms /bin/bash banana
+
 WORKDIR /app
+
+# used to store temporary files
+RUN mkdir -p /app/temp_work_files
 
 RUN git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui.git && \
     cd stable-diffusion-webui && \
