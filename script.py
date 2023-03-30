@@ -118,6 +118,7 @@ async def inference(run_id, run_asset_dir, request: Request):
     # read the video file
     tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
     frame_dir = os.path.join(run_asset_dir, 'frames_raw')
+    os.makedirs(frame_dir)
     # split video file into frames
     video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=30)
 
