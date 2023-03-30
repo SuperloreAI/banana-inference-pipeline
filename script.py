@@ -9,6 +9,9 @@ import subprocess
 import shlex
 import uuid
 import shutil
+import base64
+from io import BytesIO
+from PIL import Image
 
 client = None
 
@@ -77,6 +80,18 @@ def register_endpoints(block, app):
     client = TestClient(app)
 
 
+def convert_b64_image(encoded_image):
+    image_data = base64.b64decode(encoded_image)
+    image = Image.open(BytesIO(image_data))
+    return image
+
+def b64_encode(image):
+    buffer = BytesIO()
+    image.save(buffer, format='JPEG')
+    img_str = base64.b64encode(buffer.getvalue())
+    return img_str.decode('utf-8')
+
+
 async def inference_handler(request: Request):
     global client
     print('received inference request...')
@@ -106,6 +121,101 @@ async def inference_handler(request: Request):
     return result
 
 
+"""
+API request body:
+{
+    "video_file": "https://storage.googleapis.com/superlore-video-sources-738437/demo-man.mp4",
+    "params": {
+        "prompt": "a beautiful woman",
+        "negative_prompt": "",
+        "width": 512,
+        "height": 512,
+        "denoising_strength": 0.9,
+        "cfg_scale": 7,
+        "seed": -1,
+        "steps": 20,
+        "restore_faces": false,
+        "sampler_index": "Euler a",
+        "alwayson_scripts": {
+            "controlnet": {
+                "args": [
+                    {
+                        "input_image": "base64...",  # Added in via script
+                        "module": "canny",
+                        "model": "control_sd15_canny",
+                        "weight": 1,
+                        "resize_mode": 0,
+                        "processor_res": 512,
+                        "guidance_start": 0, 
+                        "guidance_end": 1,
+                        "threshold_a": 100,
+                        "threshold_b": 200,
+                    }
+                ]
+            }
+        }
+    }
+}
+Notes:
+
+"resize_mode" : how to resize the input image so as to fit the output resolution of the generation. defaults to "Scale to Fit (Inner Fit)". Accepted values:
+    0 or "Just Resize" : simply resize the image to the target width/height
+    1 or "Scale to Fit (Inner Fit)" : scale and crop to fit smallest dimension. preserves proportions.
+    2 or "Envelope (Outer Fit)" : scale to fit largest dimension. preserves proportions
+
+From SD web ui API (see 127.0.0.1/docs)
+img2img
+{
+  "init_images": [
+    "string"
+  ],
+  - "resize_mode": 0,
+  - "denoising_strength": 0.75,
+  - "image_cfg_scale": 0,
+  "mask": "string",
+  "mask_blur": 4,
+  "inpainting_fill": 0,
+  "inpaint_full_res": true,
+  "inpaint_full_res_padding": 0,
+  "inpainting_mask_invert": 0,
+  "initial_noise_multiplier": 0,
+  - "prompt": "",
+  "styles": [
+    "string"
+  ],
+  - "seed": -1,
+  "subseed": -1,
+  "subseed_strength": 0,
+  "seed_resize_from_h": -1,
+  "seed_resize_from_w": -1,
+  "sampler_name": "string",
+  "batch_size": 1,
+  "n_iter": 1,
+  - "steps": 50,
+  - "cfg_scale": 7,
+  - "width": 512,
+  - "height": 512,
+  - "restore_faces": false,
+  "tiling": false,
+  "do_not_save_samples": false,
+  "do_not_save_grid": false,
+  "negative_prompt": "string",
+  "eta": 0,
+  "s_churn": 0,
+  "s_tmax": 0,
+  "s_tmin": 0,
+  "s_noise": 1,
+  "override_settings": {},
+  "override_settings_restore_afterwards": true,
+  "script_args": [],
+  "sampler_index": "Euler",
+  "include_init_images": false,
+  "script_name": "string",
+  "send_images": true,
+  "save_images": false,
+  "alwayson_scripts": {}
+}
+"""
 async def inference(run_id, run_asset_dir, request: Request):
     global client
     body = await request.body()
@@ -114,6 +224,41 @@ async def inference(run_id, run_asset_dir, request: Request):
     if not ('video_file' in model_input):
         print('video_file is not in request... exiting...')
         raise ValueError("video_file is required")
+
+    if not ("params" in model_input):
+        print('params is not in request... exiting...')
+        raise ValueError("params is required")
+
+    # see if valid controlnet config 
+    # controlnet modules 
+    cn_module_availability_raw = client.get('/controlnet/module_list')
+    cn_module_availability = cn_module_availability_raw.json().get('module_list', [])
+
+    # controlnet models
+    cn_model_availability_raw = client.get('/controlnet/model_list')
+    cn_model_availability = cn_model_availability_raw.json().get('model_list', [])
+
+    print('controlnet module availability: ', ', '.join(cn_module_availability))
+    print('controlnet model availability: ', ', '.join(cn_model_availability))
+
+    if 'alwayson_scripts' in model_input['params']:
+        if 'controlnet' in model_input['params']['alwayson_scripts']:
+            # check if the module is available
+            control_units = model_input['params']['alwayson_scripts']['controlnet']['args']
+            if any(not (s['module'] in cn_module_availability) for s in control_units):
+                raise ValueError("controlnet module is not available")
+            # check if the model is available
+            if any(not (s['model'] in cn_model_availability) for s in control_units):
+                raise ValueError("controlnet model is not available")
+
+    params = model_input['params']
+
+    # sort out our base params
+    # default to 512x512 if not specified (SD 1.5)
+    if 'width' not in params:
+        params['width'] = 512
+    if 'height' not in params:
+        params['height'] = 512
 
     # read the video file
     tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
@@ -136,51 +281,107 @@ async def inference(run_id, run_asset_dir, request: Request):
 
     reference_imgs = [os.path.join(frame_dir, x) for x in
                       sorted(os.listdir(frame_dir), key=numerical_part)]
+    
+    if len(reference_imgs) > 2000:
+        raise ValueError(f"too many frames in video - must be less than 2000 at 30FPS (received {len(reference_imgs)})")    
 
     print(f'starting inference... processing {len(reference_imgs)} images')
 
     loops = len(reference_imgs)
 
-    params = None
-    mode = 'default'
+    initial_width = params['width']
+    height = params['height']
+    third_image = None
+    third_image_index = 0
 
-    if 'endpoint' in model_input:
-        endpoint = model_input['endpoint']
-        if 'params' in model_input:
-            params = model_input['params']
-    else:
-        mode = 'banana_compat'
-        endpoint = 'txt2img'
-        params = model_input
+    for i in range(loops):
+        if i > 6:
+            # TODO: remove after dev
+            print('DEV BREAKING EARLY')
+            break 
 
-    if endpoint == 'txt2img' or endpoint == 'img2img':
-        if 'width' not in params:
-            params['width'] = 768
-        if 'height' not in params:
-            params['height'] = 768
+        print(f'processing frame {i + 1} of {loops}')
+        frame_params = params.copy()
+        endpoint = 'img2img'
 
-    if endpoint == 'txt2img':
-        if 'num_inference_steps' in params:
-            params['steps'] = params['num_inference_steps']
-            del params['num_inference_steps']
-        if 'guidance_scale' in params:
-            params['cfg_scale'] = params['guidance_scale']
-            del params['guidance_scale']
+        ref_image = Image.open(reference_imgs[i]).convert("RGB").resize((initial_width, height), Image.ANTIALIAS)
+        
+        if (i > 0):
+            break
+        else:
+            # first frame - we use txt2img
+            endpoint = 'txt2img'
 
-    if params is not None:
-        response = client.post('/sdapi/v1/' + endpoint, json = params)
-    else:
-        response = client.get('/sdapi/v1/' + endpoint)
+            latent_mask = Image.new("RGB", (initial_width, height), "white")
+            # TODO add mask to API request
 
-    output = response.json()
+            # add the control net inputs
+            if 'alwayson_scripts' in frame_params and 'controlnet' in frame_params['alwayson_scripts']:
+                control_units = frame_params['alwayson_scripts']['controlnet']['args']
+                for i, _ in enumerate(control_units):
+                    control_units[i]['input_image'] = b64_encode(ref_image)
 
-    if mode == 'banana_compat' and 'images' in output:
-        output = {
-            "base64_output": output["images"][0]
-        }
+        # Call the webui API
+        print('calling API...')
+        response = client.post('/sdapi/v1/' + endpoint, json = frame_params)
 
-    output["callParams"] = params
+        output = response.json()
+        processed_image_b64 = output["images"][0]  # base 64 encoded
+        processed_image = convert_b64_image(processed_image_b64)
 
-    return output
+        init_img = processed_image
+        if (i > 0):
+            init_img = init_img.crop((initial_width, 0, initial_width * 2, height))
+
+        # Sort out the third_frame_image
+        if i == 0:
+            third_image = init_img
+            third_image_index = 0
+        # TODO: support historical 3rd frame etc...
+
+
+    # params = None
+    # mode = 'default'
+
+    # if 'endpoint' in model_input:
+    #     endpoint = model_input['endpoint']
+    #     if 'params' in model_input:
+    #         params = model_input['params']
+    # else:
+    #     mode = 'banana_compat'
+    #     endpoint = 'txt2img'
+    #     params = model_input
+
+    # if endpoint == 'txt2img' or endpoint == 'img2img':
+    #     if 'width' not in params:
+    #         params['width'] = 768
+    #     if 'height' not in params:
+    #         params['height'] = 768
+
+    # if endpoint == 'txt2img':
+    #     if 'num_inference_steps' in params:
+    #         params['steps'] = params['num_inference_steps']
+    #         del params['num_inference_steps']
+    #     if 'guidance_scale' in params:
+    #         params['cfg_scale'] = params['guidance_scale']
+    #         del params['guidance_scale']
+
+    # if params is not None:
+    #     response = client.post('/sdapi/v1/' + endpoint, json = params)
+    # else:
+    #     response = client.get('/sdapi/v1/' + endpoint)
+
+    # output = response.json()
+
+    # if mode == 'banana_compat' and 'images' in output:
+    #     output = {
+    #         "base64_output": output["images"][0]
+    #     }
+
+    # output["callParams"] = params
+
+    print('done! no errors')
+
+    return {"done": True}
 
 on_app_started(register_endpoints)
