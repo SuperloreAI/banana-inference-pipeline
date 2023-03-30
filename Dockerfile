@@ -6,8 +6,7 @@ ARG MODEL_URL='https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/v
 # Use a comma to separate the models [IMPORTANT]
 ARG CONTROLNET_MODEL_URLS="\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_canny.pth,\
-    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_depth.pth\
-    "
+    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_depth.pth"
 
 # If you are using a private Huggingface model (sign in required to download) insert your Huggingface
 # access token (https://huggingface.co/settings/tokens) below:
@@ -31,16 +30,18 @@ RUN git clone https://github.com/SuperloreAI/stable-diffusion-webui.git && \
     cd stable-diffusion-webui && \
     git checkout 22bcc7be428c94e9408f589966c2040187245d81
 
+WORKDIR /app/stable-diffusion-webui
+
 # SD Controlnet
 RUN git clone https://github.com/SuperloreAI/sd-webui-controlnet.git extensions/sd-webui-controlnet && \
     cd extensions/sd-webui-controlnet && \
-    git checkout 241c05f8c9d3c5abe637187e3c4bb46f17447029 && \ 
-    cd ../../
+    git checkout 241c05f8c9d3c5abe637187e3c4bb46f17447029
+    
+RUN mkdir -p models/ControlNet
 
 # RUN git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui.git && \
 # cd stable-diffusion-webui && \
 # git checkout 3e0f9a75438fa815429b5530261bcf7d80f3f101
-WORKDIR /app/stable-diffusion-webui
 
 ENV MODEL_URL=${MODEL_URL}
 ENV CONTROLNET_MODEL_URLS=${CONTROLNET_MODEL_URLS}
