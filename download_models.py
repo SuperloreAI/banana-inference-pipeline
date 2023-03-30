@@ -70,7 +70,7 @@ def download(url, id="model", path="models/Stable-diffusion/"):
         download_other_file(url, id, path)
 
 if __name__ == '__main__':
-    # download(MODEL_URL, "model", "models/Stable-diffusion/")
+    download(MODEL_URL, "model", "models/Stable-diffusion/")
     for i, url in enumerate(CONTROLNET_MODEL_URLS):
         print('Downloading controlnet model', i, url)
         # Model name becomes the model ID

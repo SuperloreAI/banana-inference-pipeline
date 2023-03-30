@@ -48,8 +48,8 @@ ENV CONTROLNET_MODEL_URLS=${CONTROLNET_MODEL_URLS}
 ENV HF_TOKEN=${HF_TOKEN}
 
 RUN pip install tqdm requests
-ADD download_checkpoint.py .
-RUN python download_checkpoint.py
+ADD download_models.py .
+RUN python download_models.py
 
 ADD prepare.py .
 RUN python prepare.py --skip-torch-cuda-test --xformers --reinstall-torch --reinstall-xformers
