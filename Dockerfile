@@ -12,6 +12,8 @@ ARG CONTROLNET_MODEL_URLS="\
 # access token (https://huggingface.co/settings/tokens) below:
 ARG HF_TOKEN=''
 
+ARG GCP_SERVICE_ACCOUNT_KEY=''
+
 RUN apt update && apt-get -y install git wget \
     python3.10 python3.10-venv python3-pip \
     build-essential libgl-dev libglib2.0-0 vim \
@@ -21,6 +23,10 @@ RUN ln -s /usr/bin/python3.10 /usr/bin/python
 RUN useradd -ms /bin/bash banana
 
 WORKDIR /app
+
+RUN touch .secrets.json
+RUN chmod 600 .secrets.json
+RUN echo ${GCP_SERVICE_ACCOUNT_KEY} > .secrets.json
 
 # used to store temporary files
 RUN mkdir -p /app/temp_work_files
@@ -47,7 +53,7 @@ ENV MODEL_URL=${MODEL_URL}
 ENV CONTROLNET_MODEL_URLS=${CONTROLNET_MODEL_URLS}
 ENV HF_TOKEN=${HF_TOKEN}
 
-RUN pip install tqdm requests
+RUN pip install tqdm requests google-cloud-storage
 ADD download_models.py .
 RUN python download_models.py
 

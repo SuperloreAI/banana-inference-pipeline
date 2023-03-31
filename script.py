@@ -12,10 +12,27 @@ import shutil
 import base64
 from io import BytesIO
 from PIL import Image
+from google.cloud import storage
 
 client = None
 
 temp_work_dir = "/app/temp_work_files"
+output_bucket = "superlore-creative-runs-356405"
+secret_file = "/app/.secrets.json"
+
+# Create a client object using the credentials from the JSON key file
+gcp_client = storage.Client.from_service_account_json(secret_file)
+
+def write_to_gcp(local_filepath, output_filepath, bucket_name=output_bucket):
+    print('writing to gcp', local_filepath, output_filepath, bucket_name)
+    # Get a bucket object
+    bucket = gcp_client.get_bucket(bucket_name)
+
+    # Create a blob object for the file
+    blob = bucket.blob(output_filepath)
+
+    # Upload the file to the bucket
+    blob.upload_from_filename(local_filepath)
 
 def healthcheck():
     gpu = False
@@ -328,6 +345,10 @@ async def inference(run_id, run_asset_dir, request: Request):
         output = response.json()
         processed_image_b64 = output["images"][0]  # base 64 encoded
         processed_image = convert_b64_image(processed_image_b64)
+
+        # dev save image locally + upload to google storage
+        processed_image.save(os.path.join(run_asset_dir, f'tmp_frame_{i}.png'))
+        write_to_gcp(os.path.join(run_asset_dir, f'tmp_frame_{i}.png'), f'{run_id}/tmp_frame_{i}.png')
 
         init_img = processed_image
         if (i > 0):
