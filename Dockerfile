@@ -24,9 +24,9 @@ RUN useradd -ms /bin/bash banana
 
 WORKDIR /app
 
-RUN touch .secrets.json
-RUN chmod 600 .secrets.json
-RUN echo ${GCP_SERVICE_ACCOUNT_KEY} > .secrets.json
+# RUN touch /app/.secrets.json
+# RUN chmod 600 /app/.secrets.json
+# RUN echo "${GCP_SERVICE_ACCOUNT_KEY}" > /app/.secrets.json
 
 # used to store temporary files
 RUN mkdir -p /app/temp_work_files
