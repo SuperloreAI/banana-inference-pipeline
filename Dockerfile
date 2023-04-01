@@ -34,7 +34,7 @@ RUN mkdir -p /app/temp_work_files
 # SD Webui
 RUN git clone https://github.com/SuperloreAI/stable-diffusion-webui.git && \
     cd stable-diffusion-webui && \
-    git checkout 22bcc7be428c94e9408f589966c2040187245d81
+    git checkout 769def1e418c74107e4bfe1c7c990d20faed4c17
 
 WORKDIR /app/stable-diffusion-webui
 

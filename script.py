@@ -11,7 +11,7 @@ import uuid
 import shutil
 import base64
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageOps
 from google.cloud import storage
 import json
 
@@ -43,7 +43,6 @@ gcp_client = storage.Client.from_service_account_info(secret)
 
 
 def write_to_gcp(local_filepath, output_filepath, bucket_name=output_bucket):
-    print('writing to gcp', local_filepath, output_filepath, bucket_name)
     # # Get a bucket object
     bucket = gcp_client.get_bucket(bucket_name)
 
@@ -127,9 +126,13 @@ def b64_encode(image):
     return img_str.decode('utf-8')
 
 
+def open_image(image_path, w, h):
+    image = Image.open(image_path).convert("RGB").resize((w, h), Image.ANTIALIAS)
+    return image
+
 async def inference_handler(request: Request):
     global client
-    print('received inference request...')
+    print('received inference request')
 
     # Generate a random UUID
     run_uuid = uuid.uuid4()
@@ -160,6 +163,8 @@ async def inference_handler(request: Request):
 API request body:
 {
     "video_file": "https://storage.googleapis.com/superlore-video-sources-738437/demo-man.mp4",
+    "loopback_souce": "FirstGen",
+    "save_image_samples": 1,  # saves a sample image every N frames
     "params": {
         "prompt": "a beautiful woman",
         "negative_prompt": "",
@@ -211,6 +216,11 @@ async def inference(run_id, run_asset_dir, request: Request):
     if not ("params" in model_input):
         print('params is not in request... exiting...')
         raise ValueError("params is required")
+    
+    if not ("loopback_souce" in model_input):
+        loopback_souce = 'PreviousFrame'
+    else:
+        loopback_souce = model_input['loopback_souce']
 
     # see if valid controlnet config 
     # controlnet modules 
@@ -221,8 +231,8 @@ async def inference(run_id, run_asset_dir, request: Request):
     cn_model_availability_raw = client.get('/controlnet/model_list')
     cn_model_availability = cn_model_availability_raw.json().get('model_list', [])
 
-    print('controlnet module availability: ', ', '.join(cn_module_availability))
-    print('controlnet model availability: ', ', '.join(cn_model_availability))
+    # print('controlnet module availability: ', ', '.join(cn_module_availability))
+    # print('controlnet model availability: ', ', '.join(cn_model_availability))
 
     if 'alwayson_scripts' in model_input['params']:
         if 'controlnet' in model_input['params']['alwayson_scripts']:
@@ -242,6 +252,8 @@ async def inference(run_id, run_asset_dir, request: Request):
         params['width'] = 512
     if 'height' not in params:
         params['height'] = 512
+
+    save_image_samples = model_input.get('save_image_samples', -1)
 
     # # update the config for multi controlnet
     # print('updating config file', config_file)
@@ -298,6 +310,7 @@ async def inference(run_id, run_asset_dir, request: Request):
     height = params['height']
     third_image = None
     third_image_index = 0
+    history = []
 
     for i in range(loops):
         if i > 6:
@@ -309,22 +322,107 @@ async def inference(run_id, run_asset_dir, request: Request):
         frame_params = params.copy()
         endpoint = 'img2img'
 
-        ref_image = Image.open(reference_imgs[i]).convert("RGB").resize((initial_width, height), Image.ANTIALIAS)
+        # ref_image = Image.open(reference_imgs[i]).convert("RGB").resize((initial_width, height), Image.ANTIALIAS)
+        ref_image = open_image(reference_imgs[i], initial_width, height)
         
         if (i > 0):
-            break
+            # init_images initialized at end of first loop
+            loopback_image = init_images[0]  # AKA historical option
+            if loopback_souce == "FirstGen":
+                loopback_image = history[0]
+            elif loopback_souce == "InputFrame":
+                loopback_image = ref_image
+
+            if i > 1:
+                # 3 frame comparison
+                working_width = initial_width * 3
+                img = Image.new("RGB", (working_width, height))
+                img.paste(init_images[0], (0, 0))
+                # img.paste(p.init_images[0], (initial_width, 0))
+                img.paste(loopback_image, (initial_width, 0))
+                img.paste(third_image, (initial_width * 2, 0))
+                init_images = [img]  # pass in 3 frames
+
+                # TODO add color correction
+                # if color_correction_enabled:
+                #     p.color_corrections = [processing.setup_color_correction(img)]
+
+                # add the control net inputs
+                cn_input = Image.new("RGB", (working_width, height))
+                cn_input.paste(open_image(reference_imgs[i - 1], initial_width, height), (0, 0))
+                cn_input.paste(ref_image, (initial_width, 0))
+                cn_input.paste(open_image(reference_imgs[third_image_index], initial_width, height), (initial_width * 2, 0))
+                if 'alwayson_scripts' in frame_params and 'controlnet' in frame_params['alwayson_scripts']:
+                    for ii in range(len(frame_params['alwayson_scripts']['controlnet']['args'])):
+                        if not isinstance(frame_params['alwayson_scripts']['controlnet']['args'][ii], dict):
+                            continue
+                        frame_params['alwayson_scripts']['controlnet']['args'][ii]['input_image'] = b64_encode(cn_input)
+
+                latent_mask = Image.new("RGB", (working_width, height), "black")
+                latent_draw = ImageDraw.Draw(latent_mask)
+                latent_draw.rectangle((initial_width, 0, initial_width * 2, height), fill="white")
+
+                frame_params['mask'] = b64_encode(latent_mask)
+                frame_params['init_images'] = [b64_encode(img) for img in init_images]
+                # p.image_mask = latent_mask
+                # p.denoising_strength = original_denoise
+            else:
+                # 2 frame comparison
+                working_width = initial_width * 2
+                img = Image.new("RGB", (working_width, height))
+                img.paste(init_images[0], (0, 0))
+                # img.paste(p.init_images[0], (initial_width, 0))
+                img.paste(loopback_image, (initial_width, 0))
+                init_images = [img]
+
+                # REMOVE THIS
+                img.save(os.path.join(run_asset_dir, f'tmp_inputframe_{i}.png'))
+                write_to_gcp(os.path.join(run_asset_dir, f'tmp_inputframe_{i}.png'), f'{run_id}/tmp_inputframe_{i}.png')
+
+                # TODO add color correction
+                # if color_correction_enabled:
+                #     p.color_corrections = [processing.setup_color_correction(img)]
+
+                # # add the control net inputs
+                cn_input = Image.new("RGB", (working_width, height))
+                cn_input.paste(open_image(reference_imgs[i - 1], initial_width, height), (0, 0))
+                cn_input.paste(ref_image, (initial_width, 0))
+                if 'alwayson_scripts' in frame_params and 'controlnet' in frame_params['alwayson_scripts']:
+                    control_units = frame_params['alwayson_scripts']['controlnet']['args']
+                    for ii in range(len(frame_params['alwayson_scripts']['controlnet']['args'])):
+                        if not isinstance(frame_params['alwayson_scripts']['controlnet']['args'][ii], dict):
+                            continue
+                        frame_params['alwayson_scripts']['controlnet']['args'][ii]['input_image'] = b64_encode(cn_input)
+
+                # latent_mask = Image.new("RGB", (initial_width*2, p.height), "white")
+                # latent_draw = ImageDraw.Draw(latent_mask)
+                # latent_draw.rectangle((0,0,initial_width,p.height), fill="black")
+                latent_mask = Image.new("RGB", (working_width, height), "black")
+                latent_draw = ImageDraw.Draw(latent_mask)
+                latent_draw.rectangle((initial_width, 0, working_width, height), fill="white")
+
+                # REMOVE THIS 
+                latent_mask.save(os.path.join(run_asset_dir, f'tmp_mask_{i}.png'))
+                write_to_gcp(os.path.join(run_asset_dir, f'tmp_mask_{i}.png'), f'{run_id}/tmp_mask_{i}.png')
+
+                # p.latent_mask = latent_mask
+                frame_params['mask'] = b64_encode(latent_mask)
+                frame_params['init_images'] = [b64_encode(img) for img in init_images]
+                # p.denoising_strength = original_denoise
         else:
+            print('first frame....')
             # first frame - we use txt2img
             endpoint = 'txt2img'
 
             latent_mask = Image.new("RGB", (initial_width, height), "white")
-            # TODO add mask to API request
+            frame_params['mask'] = b64_encode(latent_mask)
 
             # add the control net inputs
             if 'alwayson_scripts' in frame_params and 'controlnet' in frame_params['alwayson_scripts']:
-                control_units = frame_params['alwayson_scripts']['controlnet']['args']
-                for i, _ in enumerate(control_units):
-                    control_units[i]['input_image'] = b64_encode(ref_image)
+                for ii in range(len(frame_params['alwayson_scripts']['controlnet']['args'])):
+                    if not isinstance(frame_params['alwayson_scripts']['controlnet']['args'][ii], dict):
+                        continue
+                    frame_params['alwayson_scripts']['controlnet']['args'][ii]['input_image'] = b64_encode(ref_image)
 
         # Call the webui API
         print('calling API...')
@@ -334,20 +432,34 @@ async def inference(run_id, run_asset_dir, request: Request):
         processed_image_b64 = output["images"][0]  # base 64 encoded
         processed_image = convert_b64_image(processed_image_b64)
 
-        # dev save image locally + upload to google storage
-        processed_image.save(os.path.join(run_asset_dir, f'tmp_frame_{i}.png'))
-        write_to_gcp(os.path.join(run_asset_dir, f'tmp_frame_{i}.png'), f'{run_id}/tmp_frame_{i}.png')
-
         init_img = processed_image
         if (i > 0):
             init_img = init_img.crop((initial_width, 0, initial_width * 2, height))
 
+        generate_samples = save_image_samples > 0 and i % save_image_samples == 0
+        # dev save image locally + upload to google storage
+        if generate_samples:
+            g_sample_filename_local = os.path.join(run_asset_dir, f'grid_{i}.png')
+            g_sample_filename_output_path = f'{run_id}/grid_{i}.png'
+            processed_image.save(g_sample_filename_local)
+            write_to_gcp(g_sample_filename_local, g_sample_filename_output_path)
+            f_sample_filename_local = os.path.join(run_asset_dir, f'frame_{i}.png')
+            f_sample_filename_output_path = f'{run_id}/frame_{i}.png'
+            init_img.save(f_sample_filename_local)
+            write_to_gcp(f_sample_filename_local, f_sample_filename_output_path)
+            
+
         # Sort out the third_frame_image
         if i == 0:
+            # Default FirstGen
             third_image = init_img
             third_image_index = 0
+
+        init_images = [init_img]
+
         # TODO: support historical 3rd frame etc...
 
+        history.append(init_img)
 
     # params = None
     # mode = 'default'
