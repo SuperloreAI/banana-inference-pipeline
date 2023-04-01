@@ -17,6 +17,8 @@ import json
 
 client = None
 
+sd_webui_dir = "/app/stable-diffusion-webui"
+config_file = os.path.join(sd_webui_dir, "config.json")
 temp_work_dir = "/app/temp_work_files"
 output_bucket = "superlore-creative-runs-356405"
 secret_file = "/app/.secrets.json"
@@ -113,7 +115,6 @@ def register_endpoints(block, app):
     app.add_api_route('/', inference_handler, methods=['POST'])
     client = TestClient(app)
 
-
 def convert_b64_image(encoded_image):
     image_data = base64.b64decode(encoded_image)
     image = Image.open(BytesIO(image_data))
@@ -196,59 +197,6 @@ Notes:
     0 or "Just Resize" : simply resize the image to the target width/height
     1 or "Scale to Fit (Inner Fit)" : scale and crop to fit smallest dimension. preserves proportions.
     2 or "Envelope (Outer Fit)" : scale to fit largest dimension. preserves proportions
-
-From SD web ui API (see 127.0.0.1/docs)
-img2img
-{
-  "init_images": [
-    "string"
-  ],
-  - "resize_mode": 0,
-  - "denoising_strength": 0.75,
-  - "image_cfg_scale": 0,
-  "mask": "string",
-  "mask_blur": 4,
-  "inpainting_fill": 0,
-  "inpaint_full_res": true,
-  "inpaint_full_res_padding": 0,
-  "inpainting_mask_invert": 0,
-  "initial_noise_multiplier": 0,
-  - "prompt": "",
-  "styles": [
-    "string"
-  ],
-  - "seed": -1,
-  "subseed": -1,
-  "subseed_strength": 0,
-  "seed_resize_from_h": -1,
-  "seed_resize_from_w": -1,
-  "sampler_name": "string",
-  "batch_size": 1,
-  "n_iter": 1,
-  - "steps": 50,
-  - "cfg_scale": 7,
-  - "width": 512,
-  - "height": 512,
-  - "restore_faces": false,
-  "tiling": false,
-  "do_not_save_samples": false,
-  "do_not_save_grid": false,
-  "negative_prompt": "string",
-  "eta": 0,
-  "s_churn": 0,
-  "s_tmax": 0,
-  "s_tmin": 0,
-  "s_noise": 1,
-  "override_settings": {},
-  "override_settings_restore_afterwards": true,
-  "script_args": [],
-  "sampler_index": "Euler",
-  "include_init_images": false,
-  "script_name": "string",
-  "send_images": true,
-  "save_images": false,
-  "alwayson_scripts": {}
-}
 """
 async def inference(run_id, run_asset_dir, request: Request):
     global client
@@ -294,6 +242,28 @@ async def inference(run_id, run_asset_dir, request: Request):
         params['width'] = 512
     if 'height' not in params:
         params['height'] = 512
+
+    # # update the config for multi controlnet
+    # print('updating config file', config_file)
+    # print('config exists', os.path.isfile(config_file))
+    # if not os.path.isfile(config_file):
+    #     print('config file does not exist - exiting')
+    #     print('dir listing', os.listdir(sd_webui_dir))
+    #     print('ui config?', os.path.isdir(os.path.join(sd_webui_dir, 'ui-config.json')))
+    #     return
+    
+    # with open(config_file, 'r') as f:
+    #     config = json.load(f)
+
+    # print('found config', config)
+
+    # config['control_net_model_cache_size'] = 10
+    # config['control_net_max_models_num'] = 6
+
+    # print('updated config', config)
+
+    # with open(config_file, 'w') as f:
+    #     json.dump(config, f)
 
     # read the video file
     tmp_video_path = download_video(model_input['video_file'], run_asset_dir)

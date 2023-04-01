@@ -45,6 +45,8 @@ RUN git clone https://github.com/SuperloreAI/sd-webui-controlnet.git extensions/
     
 RUN mkdir -p models/ControlNet
 
+RUN echo '{"control_net_model_cache_size": 10, "control_net_max_models_num": 6}' > config.json
+
 # RUN git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui.git && \
 # cd stable-diffusion-webui && \
 # git checkout 3e0f9a75438fa815429b5530261bcf7d80f3f101
