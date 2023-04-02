@@ -5,8 +5,11 @@ ARG MODEL_URL='https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/v
 # Array representation in a string of controlnet models
 # Use a comma to separate the models [IMPORTANT]
 ARG CONTROLNET_MODEL_URLS="\
+    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_openpose.pth,\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_canny.pth,\
-    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_depth.pth"
+    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_depth.pth,\
+    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_hed.pth,\
+    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_normal.pth"
 
 # If you are using a private Huggingface model (sign in required to download) insert your Huggingface
 # access token (https://huggingface.co/settings/tokens) below:
