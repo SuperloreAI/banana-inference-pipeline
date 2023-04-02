@@ -10,7 +10,7 @@ ARG CONTROLNET_MODEL_URLS="\
 
 # If you are using a private Huggingface model (sign in required to download) insert your Huggingface
 # access token (https://huggingface.co/settings/tokens) below:
-ARG HF_TOKEN=''
+ARG HF_TOKEN='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'
 
 ARG GCP_SERVICE_ACCOUNT_KEY=''
 

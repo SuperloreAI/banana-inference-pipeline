@@ -14,6 +14,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageOps
 from google.cloud import storage
 import json
+from app import load_model_by_url
 
 client = None
 
@@ -163,8 +164,9 @@ async def inference_handler(request: Request):
 API request body:
 {
     "video_file": "https://storage.googleapis.com/superlore-video-sources-738437/demo-man.mp4",
-    "loopback_souce": "FirstGen",
-    "save_image_samples": 1,  # saves a sample image every N frames
+    "loopback_souce": "PreviousFrame", # (Optional)
+    "save_image_samples": 1,  # saves a sample image every N frames (Optional)
+    "model_url": "https://huggingface.co/Superlore/toolguru-modi-sd15/blob/main/ToolGuru7ModernDisney_5760_lora-002-001.safetensors",  # (Optional)
     "params": {
         "prompt": "a beautiful woman",
         "negative_prompt": "",
@@ -277,6 +279,11 @@ async def inference(run_id, run_asset_dir, request: Request):
     # with open(config_file, 'w') as f:
     #     json.dump(config, f)
 
+    if 'model_url' in model_input:
+        print('loading model from url', model_input['model_url'])
+        # download model
+        load_model_by_url(model_input['model_url'])
+
     # read the video file
     tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
     frame_dir = os.path.join(run_asset_dir, 'frames_raw')
@@ -364,20 +371,13 @@ async def inference(run_id, run_asset_dir, request: Request):
 
                 frame_params['mask'] = b64_encode(latent_mask)
                 frame_params['init_images'] = [b64_encode(img) for img in init_images]
-                # p.image_mask = latent_mask
-                # p.denoising_strength = original_denoise
             else:
                 # 2 frame comparison
                 working_width = initial_width * 2
                 img = Image.new("RGB", (working_width, height))
                 img.paste(init_images[0], (0, 0))
-                # img.paste(p.init_images[0], (initial_width, 0))
                 img.paste(loopback_image, (initial_width, 0))
                 init_images = [img]
-
-                # REMOVE THIS
-                img.save(os.path.join(run_asset_dir, f'tmp_inputframe_{i}.png'))
-                write_to_gcp(os.path.join(run_asset_dir, f'tmp_inputframe_{i}.png'), f'{run_id}/tmp_inputframe_{i}.png')
 
                 # TODO add color correction
                 # if color_correction_enabled:
@@ -394,9 +394,6 @@ async def inference(run_id, run_asset_dir, request: Request):
                             continue
                         frame_params['alwayson_scripts']['controlnet']['args'][ii]['input_image'] = b64_encode(cn_input)
 
-                # latent_mask = Image.new("RGB", (initial_width*2, p.height), "white")
-                # latent_draw = ImageDraw.Draw(latent_mask)
-                # latent_draw.rectangle((0,0,initial_width,p.height), fill="black")
                 latent_mask = Image.new("RGB", (working_width, height), "black")
                 latent_draw = ImageDraw.Draw(latent_mask)
                 latent_draw.rectangle((initial_width, 0, working_width, height), fill="white")
@@ -405,10 +402,8 @@ async def inference(run_id, run_asset_dir, request: Request):
                 latent_mask.save(os.path.join(run_asset_dir, f'tmp_mask_{i}.png'))
                 write_to_gcp(os.path.join(run_asset_dir, f'tmp_mask_{i}.png'), f'{run_id}/tmp_mask_{i}.png')
 
-                # p.latent_mask = latent_mask
                 frame_params['mask'] = b64_encode(latent_mask)
                 frame_params['init_images'] = [b64_encode(img) for img in init_images]
-                # p.denoising_strength = original_denoise
         else:
             print('first frame....')
             # first frame - we use txt2img
@@ -460,46 +455,6 @@ async def inference(run_id, run_asset_dir, request: Request):
         # TODO: support historical 3rd frame etc...
 
         history.append(init_img)
-
-    # params = None
-    # mode = 'default'
-
-    # if 'endpoint' in model_input:
-    #     endpoint = model_input['endpoint']
-    #     if 'params' in model_input:
-    #         params = model_input['params']
-    # else:
-    #     mode = 'banana_compat'
-    #     endpoint = 'txt2img'
-    #     params = model_input
-
-    # if endpoint == 'txt2img' or endpoint == 'img2img':
-    #     if 'width' not in params:
-    #         params['width'] = 768
-    #     if 'height' not in params:
-    #         params['height'] = 768
-
-    # if endpoint == 'txt2img':
-    #     if 'num_inference_steps' in params:
-    #         params['steps'] = params['num_inference_steps']
-    #         del params['num_inference_steps']
-    #     if 'guidance_scale' in params:
-    #         params['cfg_scale'] = params['guidance_scale']
-    #         del params['guidance_scale']
-
-    # if params is not None:
-    #     response = client.post('/sdapi/v1/' + endpoint, json = params)
-    # else:
-    #     response = client.get('/sdapi/v1/' + endpoint)
-
-    # output = response.json()
-
-    # if mode == 'banana_compat' and 'images' in output:
-    #     output = {
-    #         "base64_output": output["images"][0]
-    #     }
-
-    # output["callParams"] = params
 
     print('done! no errors')
 
