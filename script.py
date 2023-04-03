@@ -15,6 +15,7 @@ from PIL import Image, ImageDraw, ImageOps
 from google.cloud import storage
 import json
 from app import load_model_by_url
+import asyncio
 
 client = None
 
@@ -184,6 +185,7 @@ def open_image(image_path, w, h):
     image = Image.open(image_path).convert("RGB").resize((w, h), Image.ANTIALIAS)
     return image
 
+
 async def inference_handler(request: Request):
     global client
     print('received inference request')
@@ -194,10 +196,15 @@ async def inference_handler(request: Request):
     run_asset_dir = os.path.join(temp_work_dir, str(run_uuid))
     os.makedirs(run_asset_dir)
     print(f'run tmp dir {run_asset_dir}')
+    err = None
+    result = {'status': 'ok'}
 
     try:
-        result = await inference(run_uuid, run_asset_dir, request)
-        err = None
+        await prepare_inference(run_asset_dir, request)
+        task = asyncio.create_task(inference(run_uuid, run_asset_dir, request))
+        # result = await inference(run_uuid, run_asset_dir, request)
+        # Return an immediate response to the client with the run_id
+        return {'run_id': str(run_uuid), 'status': 'running'}
     except Exception as e:
         print(f'An error occurred: {type(e).__name__} - {str(e)}')
         err = e
@@ -205,15 +212,18 @@ async def inference_handler(request: Request):
         # on error, lets generate a video of everything we've got so far
 
         try:
-            print('generating video from frames')
-            frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
-            video_dir = os.path.join(run_asset_dir, video_folder)
-            video_file_local_path = create_video(frame_dir, video_dir, default_fps)
-            output_video_sample_path = f'{run_uuid}/{video_folder}/Sample-error.mp4'
-            write_to_gcp(output_video_sample_path, output_video_sample_path, default_fps)
+            anim_frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
+            if os.listdir(anim_frame_dir) > 0:
+                print('generating video from frames')
+                video_dir = os.path.join(run_asset_dir, video_folder)
+                video_file_local_path = create_video(anim_frame_dir, video_dir, default_fps)
+                output_video_sample_path = f'{run_uuid}/{video_folder}/Sample-error.mp4'
+                write_to_gcp(video_file_local_path, output_video_sample_path)
         except Exception as e:
             print(f'An error occurred: {type(e).__name__} - {str(e)}')
-
+    
+        result = {'status': 'error', 'error': 'An error occurred while preparing the inference'}
+        
     # Clean up - deletes the asset dir
     print(f'cleaning up folder {run_asset_dir}')
     shutil.rmtree(run_asset_dir)
@@ -223,6 +233,94 @@ async def inference_handler(request: Request):
 
     return result
 
+
+async def prepare_inference(run_asset_dir, request: Request):
+    global client
+    
+    body = await request.body()
+    model_input = json.loads(body)
+
+    if not ('video_file' in model_input):
+        print('video_file is not in request... exiting...')
+        raise ValueError("video_file is required")
+
+    if not ("params" in model_input):
+        print('params is not in request... exiting...')
+        raise ValueError("params is required")
+
+    # see if valid controlnet config 
+    # controlnet modules 
+    cn_module_availability_raw = client.get('/controlnet/module_list')
+    cn_module_availability = cn_module_availability_raw.json().get('module_list', [])
+
+    # controlnet models
+    cn_model_availability_raw = client.get('/controlnet/model_list')
+    cn_model_availability = cn_model_availability_raw.json().get('model_list', [])
+
+    # print('controlnet module availability: ', ', '.join(cn_module_availability))
+    # print('controlnet model availability: ', ', '.join(cn_model_availability))
+
+    if 'alwayson_scripts' in model_input['params']:
+        if 'controlnet' in model_input['params']['alwayson_scripts']:
+            # check if the module is available
+            control_units = model_input['params']['alwayson_scripts']['controlnet']['args']
+            if any(not (s['module'] in cn_module_availability) for s in control_units):
+                raise ValueError("controlnet module is not available")
+            # check if the model is available
+            if any(not (s['model'] in cn_model_availability) for s in control_units):
+                raise ValueError("controlnet model is not available")
+
+    params = model_input['params']
+
+    # sort out our base params
+    # default to 512x512 if not specified (SD 1.5)
+    if 'width' not in params:
+        params['width'] = 512
+    if 'height' not in params:
+        params['height'] = 512
+
+
+    # # update the config for multi controlnet
+    # print('updating config file', config_file)
+    # print('config exists', os.path.isfile(config_file))
+    # if not os.path.isfile(config_file):
+    #     print('config file does not exist - exiting')
+    #     print('dir listing', os.listdir(sd_webui_dir))
+    #     print('ui config?', os.path.isdir(os.path.join(sd_webui_dir, 'ui-config.json')))
+    #     return
+    
+    # with open(config_file, 'r') as f:
+    #     config = json.load(f)
+
+    # print('found config', config)
+
+    # config['control_net_model_cache_size'] = 10
+    # config['control_net_max_models_num'] = 6
+
+    # print('updated config', config)
+
+    # with open(config_file, 'w') as f:
+    #     json.dump(config, f)
+
+    if 'model_url' in model_input:
+        print('loading model from url', model_input['model_url'])
+        # download model
+        load_model_by_url(model_input['model_url'])
+
+    # read the video file
+    tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
+    frame_dir = os.path.join(run_asset_dir, 'frames_raw')
+    os.makedirs(frame_dir)
+    # split video file into frames
+    video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=default_fps)
+
+    reference_imgs = [os.path.join(frame_dir, x) for x in
+                      sorted(os.listdir(frame_dir), key=numerical_part)]
+    
+    if len(reference_imgs) > 2000:
+        raise ValueError(f"too many frames in video - must be less than 2000 at 30FPS (received {len(reference_imgs)})")    
+
+    return model_input
 
 """
 API request body:
@@ -270,110 +368,17 @@ Notes:
     1 or "Scale to Fit (Inner Fit)" : scale and crop to fit smallest dimension. preserves proportions.
     2 or "Envelope (Outer Fit)" : scale to fit largest dimension. preserves proportions
 """
-async def inference(run_id, run_asset_dir, request: Request):
+async def inference(run_id, run_asset_dir, model_input, reference_imgs):
     global client
-    
-    body = await request.body()
-    model_input = json.loads(body)
-
-    if not ('video_file' in model_input):
-        print('video_file is not in request... exiting...')
-        raise ValueError("video_file is required")
-
-    if not ("params" in model_input):
-        print('params is not in request... exiting...')
-        raise ValueError("params is required")
-    
     if not ("loopback_souce" in model_input):
         loopback_souce = 'PreviousFrame'
     else:
         loopback_souce = model_input['loopback_souce']
 
-    # see if valid controlnet config 
-    # controlnet modules 
-    cn_module_availability_raw = client.get('/controlnet/module_list')
-    cn_module_availability = cn_module_availability_raw.json().get('module_list', [])
-
-    # controlnet models
-    cn_model_availability_raw = client.get('/controlnet/model_list')
-    cn_model_availability = cn_model_availability_raw.json().get('model_list', [])
-
-    # print('controlnet module availability: ', ', '.join(cn_module_availability))
-    # print('controlnet model availability: ', ', '.join(cn_model_availability))
-
-    if 'alwayson_scripts' in model_input['params']:
-        if 'controlnet' in model_input['params']['alwayson_scripts']:
-            # check if the module is available
-            control_units = model_input['params']['alwayson_scripts']['controlnet']['args']
-            if any(not (s['module'] in cn_module_availability) for s in control_units):
-                raise ValueError("controlnet module is not available")
-            # check if the model is available
-            if any(not (s['model'] in cn_model_availability) for s in control_units):
-                raise ValueError("controlnet model is not available")
-
-    params = model_input['params']
-
-    # sort out our base params
-    # default to 512x512 if not specified (SD 1.5)
-    if 'width' not in params:
-        params['width'] = 512
-    if 'height' not in params:
-        params['height'] = 512
-
     save_image_samples = model_input.get('save_image_samples', -1)
     save_video_samples = model_input.get('save_video_samples', -1)
 
-    # # update the config for multi controlnet
-    # print('updating config file', config_file)
-    # print('config exists', os.path.isfile(config_file))
-    # if not os.path.isfile(config_file):
-    #     print('config file does not exist - exiting')
-    #     print('dir listing', os.listdir(sd_webui_dir))
-    #     print('ui config?', os.path.isdir(os.path.join(sd_webui_dir, 'ui-config.json')))
-    #     return
-    
-    # with open(config_file, 'r') as f:
-    #     config = json.load(f)
-
-    # print('found config', config)
-
-    # config['control_net_model_cache_size'] = 10
-    # config['control_net_max_models_num'] = 6
-
-    # print('updated config', config)
-
-    # with open(config_file, 'w') as f:
-    #     json.dump(config, f)
-
-    if 'model_url' in model_input:
-        print('loading model from url', model_input['model_url'])
-        # download model
-        load_model_by_url(model_input['model_url'])
-
-    # read the video file
-    tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
-    frame_dir = os.path.join(run_asset_dir, 'frames_raw')
-    os.makedirs(frame_dir)
-    # split video file into frames
-    video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=default_fps)
-
-    # run the main script
-    """
-    how it works (please review https://xanthius.itch.io/multi-frame-rendering-for-stablediffusion)
-    1) txt 2 img on the first frame 
-    2) img2img on 2nd frame (with the first frame beside it)
-    3) img2img on Nth frame (with previous frame + reference frame beside it) 
-    
-    This will write animation frames to the temp output directory
-    After all frames processed, it will use ffmpeg to make them a video
-    Then saves the video to google storage
-    """
-
-    reference_imgs = [os.path.join(frame_dir, x) for x in
-                      sorted(os.listdir(frame_dir), key=numerical_part)]
-    
-    if len(reference_imgs) > 2000:
-        raise ValueError(f"too many frames in video - must be less than 2000 at 30FPS (received {len(reference_imgs)})")    
+    params = model_input['params']
 
     print(f'starting inference... processing {len(reference_imgs)} images')
 
