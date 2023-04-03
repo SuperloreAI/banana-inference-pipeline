@@ -112,17 +112,12 @@ def create_video(frames_dir, output_file, fps=30):
         raise ValueError(f'fps must be a positive integer value')
 
     # Create the temporary directory if it doesn't exist
-    print('check if path exist?', os.path.dirname(output_file))
-    print('does the fucking path exist? ', os.path.exists(os.path.dirname(output_file)))
     if not os.path.exists(os.path.dirname(output_file)):
-        print("making the FUCKING PATH ", os.makedirs(os.path.dirname(output_file)))
         os.makedirs(os.path.dirname(output_file))
 
     # Define the command to create a video from the frames
     # Important: Be sure to sanitize all inputs
-    print('calling ffmpeg on video frames')
-    cmd = f'ffmpeg -r {fps} -i {shlex.quote(os.path.join(frames_dir, frame_wildcard))} -c:v libx264 -crf 25 -profile:v high -pix_fmt yuv420p "{shlex.quote(output_file)}"'
-    print('cmd', cmd)
+    cmd = f'ffmpeg -r {fps} -i {shlex.quote(os.path.join(frames_dir, frame_wildcard))} -c:v libx264 -crf 25 -profile:v high -pix_fmt yuv420p {shlex.quote(output_file)}'
 
     # Execute the command using subprocess
     subprocess.call(cmd, shell=True)
@@ -376,10 +371,10 @@ async def inference(run_id, run_asset_dir, request):
     # Load model ################################
     #############################################
 
-    # if 'model_url' in model_input:
-    #     print('loading model from url', model_input['model_url'])
-    #     # download model
-    #     load_model_by_url(model_input['model_url'])
+    if 'model_url' in model_input:
+        print('loading model from url', model_input['model_url'])
+        # download model
+        load_model_by_url(model_input['model_url'])
 
     #############################################
     # Script logic ##############################
