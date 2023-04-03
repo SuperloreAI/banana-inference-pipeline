@@ -27,6 +27,7 @@ secret_file = "/app/.secrets.json"
 secret_file_tmp = "/app/.secrets_temp.json"  # Hack work around
 frame_wildcard = "Frame-%05d.png"
 animation_frame_folder = "animation_frames"
+frames_raw_folder = "frames_raw"
 video_folder = "video"
 default_fps = 30
 
@@ -200,8 +201,8 @@ async def inference_handler(request: Request):
     result = {'status': 'ok'}
 
     try:
-        await prepare_inference(run_asset_dir, request)
-        task = asyncio.create_task(inference(run_uuid, run_asset_dir, request))
+        run_params = await prepare_inference(run_asset_dir, request)
+        task = asyncio.create_task(inference(run_uuid, run_asset_dir, run_params))
         # result = await inference(run_uuid, run_asset_dir, request)
         # Return an immediate response to the client with the run_id
         return {'run_id': str(run_uuid), 'status': 'running'}
@@ -309,7 +310,7 @@ async def prepare_inference(run_asset_dir, request: Request):
 
     # read the video file
     tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
-    frame_dir = os.path.join(run_asset_dir, 'frames_raw')
+    frame_dir = os.path.join(run_asset_dir, frames_raw_folder)
     os.makedirs(frame_dir)
     # split video file into frames
     video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=default_fps)
@@ -368,7 +369,7 @@ Notes:
     1 or "Scale to Fit (Inner Fit)" : scale and crop to fit smallest dimension. preserves proportions.
     2 or "Envelope (Outer Fit)" : scale to fit largest dimension. preserves proportions
 """
-async def inference(run_id, run_asset_dir, model_input, reference_imgs):
+async def inference(run_id, run_asset_dir, model_input):
     global client
     if not ("loopback_souce" in model_input):
         loopback_souce = 'PreviousFrame'
@@ -380,10 +381,7 @@ async def inference(run_id, run_asset_dir, model_input, reference_imgs):
 
     params = model_input['params']
 
-    print(f'starting inference... processing {len(reference_imgs)} images')
-
-    loops = len(reference_imgs)
-
+    source_frame_dir = os.path.join(run_asset_dir, frames_raw_folder)
     frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
     video_dir = os.path.join(run_asset_dir, video_folder)
     if not os.path.isdir(frame_dir):
@@ -396,6 +394,14 @@ async def inference(run_id, run_asset_dir, model_input, reference_imgs):
     third_image = None
     third_image_index = 0
     history = []
+
+    reference_imgs = [os.path.join(source_frame_dir, x) for x in
+                      sorted(os.listdir(source_frame_dir), key=numerical_part)]
+
+    print(f'starting inference... processing {len(reference_imgs)} images')
+
+    loops = len(reference_imgs)
+
 
     for i in range(loops):
         if i > 6:
