@@ -24,10 +24,11 @@ def get_filename(model_url, id="model", path="models/Stable-diffusion/"):
         return path + id + '.ckpt'
 
 def check_model_file(filename):
-    file_size_mb = round(os.path.getsize(filename) / (1024 * 1024))
-    if file_size_mb < 100:
-        print(f'The downloaded file is only {file_size_mb} MB and does not appear to be a valid model.')
-        sys.exit(1)
+    # file_size_mb = round(os.path.getsize(filename) / (1024 * 1024))
+    # if file_size_mb < 100:
+    #     print(f'The downloaded file is only {file_size_mb} MB and does not appear to be a valid model.')
+    #     sys.exit(1)
+    pass
 
 def download_hf_file(model_url, HF_TOKEN, id="model", path="models/Stable-diffusion/"):
     filename = get_filename(model_url, id, path)

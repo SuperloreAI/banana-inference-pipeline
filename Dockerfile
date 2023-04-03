@@ -57,6 +57,9 @@ RUN git clone https://github.com/SuperloreAI/sd-webui-controlnet.git extensions/
     git checkout 241c05f8c9d3c5abe637187e3c4bb46f17447029
     
 RUN mkdir -p models/ControlNet
+RUN mkdir -p models/openpose
+RUN mkdir -p models/hed
+RUN mkdir -p models/leres
 
 RUN echo '{"control_net_model_cache_size": 10, "control_net_max_models_num": 6}' > config.json
 
