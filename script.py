@@ -202,10 +202,11 @@ async def inference_handler(request: Request):
 
     try:
         run_params = await prepare_inference(run_asset_dir, request)
+        await send_response({'run_id': str(run_uuid), 'status': 'running'}, request)
         task = asyncio.create_task(inference(run_uuid, run_asset_dir, run_params))
+        await task
         # result = await inference(run_uuid, run_asset_dir, request)
         # Return an immediate response to the client with the run_id
-        return {'run_id': str(run_uuid), 'status': 'running'}
     except Exception as e:
         print(f'An error occurred: {type(e).__name__} - {str(e)}')
         err = e
@@ -234,6 +235,14 @@ async def inference_handler(request: Request):
 
     return result
 
+
+async def send_response(response, request):
+    response_body = json.dumps(response)
+    await request.send_response(
+        status_code=200,
+        headers={'Content-Type': 'application/json'},
+        body=response_body.encode(),
+    )
 
 async def prepare_inference(run_asset_dir, request: Request):
     global client
@@ -279,29 +288,6 @@ async def prepare_inference(run_asset_dir, request: Request):
         params['width'] = 512
     if 'height' not in params:
         params['height'] = 512
-
-
-    # # update the config for multi controlnet
-    # print('updating config file', config_file)
-    # print('config exists', os.path.isfile(config_file))
-    # if not os.path.isfile(config_file):
-    #     print('config file does not exist - exiting')
-    #     print('dir listing', os.listdir(sd_webui_dir))
-    #     print('ui config?', os.path.isdir(os.path.join(sd_webui_dir, 'ui-config.json')))
-    #     return
-    
-    # with open(config_file, 'r') as f:
-    #     config = json.load(f)
-
-    # print('found config', config)
-
-    # config['control_net_model_cache_size'] = 10
-    # config['control_net_max_models_num'] = 6
-
-    # print('updated config', config)
-
-    # with open(config_file, 'w') as f:
-    #     json.dump(config, f)
 
     if 'model_url' in model_input:
         print('loading model from url', model_input['model_url'])

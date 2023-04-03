@@ -11,6 +11,16 @@ ARG CONTROLNET_MODEL_URLS="\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_hed.pth,\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_normal.pth"
 
+ARG OPENPOSE_MODEL_URLS="\
+    https://huggingface.co/lllyasviel/ControlNet/resolve/main/annotator/ckpts/hand_pose_model.pth,\
+    https://huggingface.co/lllyasviel/ControlNet/resolve/main/annotator/ckpts/body_pose_model.pth"
+
+ARG HED_URLS="\
+    https://huggingface.co/lllyasviel/ControlNet/resolve/main/annotator/ckpts/network-bsds500.pth"
+
+ARG DEPTH_LERES_MODEL_URLS="\
+    https://cloudstor.aarnet.edu.au/plus/s/lTIJF4vrvHCAI31/download"
+
 # If you are using a private Huggingface model (sign in required to download) insert your Huggingface
 # access token (https://huggingface.co/settings/tokens) below:
 ARG HF_TOKEN='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'
@@ -57,6 +67,9 @@ RUN echo '{"control_net_model_cache_size": 10, "control_net_max_models_num": 6}'
 ENV MODEL_URL=${MODEL_URL}
 ENV CONTROLNET_MODEL_URLS=${CONTROLNET_MODEL_URLS}
 ENV HF_TOKEN=${HF_TOKEN}
+ENV OPENPOSE_MODEL_URLS=${OPENPOSE_MODEL_URLS}
+ENV HED_URLS=${HED_URLS}
+ENV DEPTH_LERES_MODEL_URLS=${DEPTH_LERES_MODEL_URLS}
 
 RUN pip install tqdm requests google-cloud-storage
 ADD download_models.py .
