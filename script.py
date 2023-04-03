@@ -24,6 +24,10 @@ temp_work_dir = "/app/temp_work_files"
 output_bucket = "superlore-creative-runs-356405"
 secret_file = "/app/.secrets.json"
 secret_file_tmp = "/app/.secrets_temp.json"  # Hack work around
+frame_wildcard = "Frame-%05d.png"
+animation_frame_folder = "animation_frames"
+video_folder = "video"
+default_fps = 30
 
 secret = {
   "type": "service_account",
@@ -86,7 +90,56 @@ def split_video_frames(video_file, output_dir, fps=30):
     # Define the command to extract frames from the video
     # Important: Be sure to sanitize all inputs
     print('calling ffmpeg on video frames')
-    cmd = f'ffmpeg -i {shlex.quote(video_file)} -r {fps} {shlex.quote(os.path.join(output_dir, "Frame-%05d.png"))}'
+    cmd = f'ffmpeg -i {shlex.quote(video_file)} -r {fps} {shlex.quote(os.path.join(output_dir, frame_wildcard))}'
+
+    # Execute the command using subprocess
+    subprocess.call(cmd, shell=True)
+
+    return output_dir
+
+
+def create_video(frames_dir, output_dir, fps=30):
+    # Validate the input parameters
+    if not os.path.isdir(frames_dir):
+        raise ValueError(f'{frames_dir} is not a valid directory')
+    if not os.path.isdir(output_dir):
+        raise ValueError(f'{output_dir} is not a valid directory')
+    if not isinstance(fps, int) or fps <= 0:
+        raise ValueError(f'fps must be a positive integer value')
+
+    # Create the temporary directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Define the command to create a video from the frames
+    # Important: Be sure to sanitize all inputs
+    print('calling ffmpeg on video frames')
+    output_file = shlex.quote(os.path.join(output_dir, 'output.mp4'))
+    cmd = f'ffmpeg -r {fps} -i {shlex.quote(os.path.join(frames_dir, frame_wildcard))} -c:v libx264 -crf 25 -profile:v high -pix_fmt yuv420p {output_file}'
+
+    # Execute the command using subprocess
+    subprocess.call(cmd, shell=True)
+
+    return output_file
+
+
+def split_video_frames(video_file, output_dir, fps=30):
+    # Validate the input parameters
+    if not os.path.isfile(video_file):
+        raise ValueError(f'{video_file} is not a valid file')
+    if not os.path.isdir(output_dir):
+        raise ValueError(f'{output_dir} is not a valid directory')
+    if not isinstance(fps, int) or fps <= 0:
+        raise ValueError(f'fps must be a positive integer value')
+
+    # Create the temporary directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Define the command to extract frames from the video
+    # Important: Be sure to sanitize all inputs
+    print('calling ffmpeg on video frames')
+    cmd = f'ffmpeg -i {shlex.quote(video_file)} -r {fps} {shlex.quote(os.path.join(output_dir, frame_wildcard))}'
 
     # Execute the command using subprocess
     subprocess.call(cmd, shell=True)
@@ -149,6 +202,17 @@ async def inference_handler(request: Request):
         print(f'An error occurred: {type(e).__name__} - {str(e)}')
         err = e
         result = None
+        # on error, lets generate a video of everything we've got so far
+
+        try:
+            print('generating video from frames')
+            frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
+            video_dir = os.path.join(run_asset_dir, video_folder)
+            video_file_local_path = create_video(frame_dir, video_dir, default_fps)
+            output_video_sample_path = f'{run_uuid}/{video_folder}/Sample-error.mp4'
+            write_to_gcp(output_video_sample_path, output_video_sample_path, default_fps)
+        except Exception as e:
+            print(f'An error occurred: {type(e).__name__} - {str(e)}')
 
     # Clean up - deletes the asset dir
     print(f'cleaning up folder {run_asset_dir}')
@@ -166,6 +230,7 @@ API request body:
     "video_file": "https://storage.googleapis.com/superlore-video-sources-738437/demo-man.mp4",
     "loopback_souce": "PreviousFrame", # (Optional)
     "save_image_samples": 1,  # saves a sample image every N frames (Optional)
+    "save_video_samples": 1,  # saves a sample video every N frames (Optional)
     "model_url": "https://huggingface.co/Superlore/toolguru-modi-sd15/blob/main/ToolGuru7ModernDisney_5760_lora-002-001.safetensors",  # (Optional)
     "params": {
         "prompt": "a beautiful woman",
@@ -256,6 +321,7 @@ async def inference(run_id, run_asset_dir, request: Request):
         params['height'] = 512
 
     save_image_samples = model_input.get('save_image_samples', -1)
+    save_video_samples = model_input.get('save_video_samples', -1)
 
     # # update the config for multi controlnet
     # print('updating config file', config_file)
@@ -289,7 +355,7 @@ async def inference(run_id, run_asset_dir, request: Request):
     frame_dir = os.path.join(run_asset_dir, 'frames_raw')
     os.makedirs(frame_dir)
     # split video file into frames
-    video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=30)
+    video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=default_fps)
 
     # run the main script
     """
@@ -312,6 +378,13 @@ async def inference(run_id, run_asset_dir, request: Request):
     print(f'starting inference... processing {len(reference_imgs)} images')
 
     loops = len(reference_imgs)
+
+    frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
+    video_dir = os.path.join(run_asset_dir, video_folder)
+    if not os.path.isdir(frame_dir):
+        os.makedirs(frame_dir)
+    if not os.path.isdir(video_dir):
+        os.makedirs(video_dir)
 
     initial_width = params['width']
     height = params['height']
@@ -398,10 +471,6 @@ async def inference(run_id, run_asset_dir, request: Request):
                 latent_draw = ImageDraw.Draw(latent_mask)
                 latent_draw.rectangle((initial_width, 0, working_width, height), fill="white")
 
-                # REMOVE THIS 
-                latent_mask.save(os.path.join(run_asset_dir, f'tmp_mask_{i}.png'))
-                write_to_gcp(os.path.join(run_asset_dir, f'tmp_mask_{i}.png'), f'{run_id}/tmp_mask_{i}.png')
-
                 frame_params['mask'] = b64_encode(latent_mask)
                 frame_params['init_images'] = [b64_encode(img) for img in init_images]
         else:
@@ -432,17 +501,21 @@ async def inference(run_id, run_asset_dir, request: Request):
             init_img = init_img.crop((initial_width, 0, initial_width * 2, height))
 
         generate_samples = save_image_samples > 0 and i % save_image_samples == 0
+        generate_video_sample = save_video_samples > 0 and i % save_video_samples == 0
         # dev save image locally + upload to google storage
         if generate_samples:
-            g_sample_filename_local = os.path.join(run_asset_dir, f'grid_{i}.png')
-            g_sample_filename_output_path = f'{run_id}/grid_{i}.png'
+            g_sample_filename_local = os.path.join(frame_dir, f'grid_{i}.png')
+            g_sample_filename_output_path = f'{run_id}/{animation_frame_folder}/grid_{i}.png'
             processed_image.save(g_sample_filename_local)
             write_to_gcp(g_sample_filename_local, g_sample_filename_output_path)
-            f_sample_filename_local = os.path.join(run_asset_dir, f'frame_{i}.png')
-            f_sample_filename_output_path = f'{run_id}/frame_{i}.png'
+            f_sample_filename_local = os.path.join(frame_dir, f'frame_{i}.png')
+            f_sample_filename_output_path = f'{run_id}/{animation_frame_folder}/frame_{i}.png'
             init_img.save(f_sample_filename_local)
             write_to_gcp(f_sample_filename_local, f_sample_filename_output_path)
-            
+        if generate_video_sample: 
+            output_video_local_path = create_video(frame_dir, os.path.join(video_dir, 'Sample-{i:04d}.mp4'), default_fps)
+            output_video_sample_path = f'{run_id}/{video_folder}/Sample-{i:04d}.mp4'
+            write_to_gcp(output_video_local_path, output_video_sample_path)
 
         # Sort out the third_frame_image
         if i == 0:
