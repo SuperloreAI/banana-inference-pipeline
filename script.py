@@ -2,7 +2,7 @@ import json
 import os
 import requests
 import subprocess
-from fastapi import FastAPI, Request, Body, HTTPException
+from fastapi import FastAPI, Request, Body, HTTPException, BackgroundTasks
 from fastapi.testclient import TestClient
 from modules.script_callbacks import on_app_started
 import subprocess
@@ -16,6 +16,7 @@ from google.cloud import storage
 import json
 from app import load_model_by_url
 import asyncio
+import re
 
 client = None
 
@@ -186,6 +187,18 @@ def open_image(image_path, w, h):
     image = Image.open(image_path).convert("RGB").resize((w, h), Image.ANTIALIAS)
     return image
 
+def is_valid_bucket_folder_name(name):
+    # Bucket folder name must be between 1 and 1024 characters
+    if len(name) < 1 or len(name) > 1024:
+        return False
+    # Bucket folder name can only contain letters, numbers, dashes, underscores, and dots
+    pattern = re.compile(r'^[a-zA-Z0-9_\-\.]+$')
+    if not pattern.match(name):
+        return False
+    # Bucket folder name cannot start or end with a dash
+    if name.startswith('-') or name.endswith('-'):
+        return False
+    return True
 
 async def inference_handler(request: Request):
     global client
@@ -201,11 +214,7 @@ async def inference_handler(request: Request):
     result = {'status': 'ok'}
 
     try:
-        run_params = await prepare_inference(run_asset_dir, request)
-        await send_response({'run_id': str(run_uuid), 'status': 'running'}, request)
-        task = asyncio.create_task(inference(run_uuid, run_asset_dir, run_params))
-        await task
-        # result = await inference(run_uuid, run_asset_dir, request)
+        result = await inference(run_uuid, run_asset_dir, request)
         # Return an immediate response to the client with the run_id
     except Exception as e:
         print(f'An error occurred: {type(e).__name__} - {str(e)}')
@@ -235,80 +244,6 @@ async def inference_handler(request: Request):
 
     return result
 
-
-async def send_response(response, request):
-    response_body = json.dumps(response)
-    await request.send_response(
-        status_code=200,
-        headers={'Content-Type': 'application/json'},
-        body=response_body.encode(),
-    )
-
-async def prepare_inference(run_asset_dir, request: Request):
-    global client
-    
-    body = await request.body()
-    model_input = json.loads(body)
-
-    if not ('video_file' in model_input):
-        print('video_file is not in request... exiting...')
-        raise ValueError("video_file is required")
-
-    if not ("params" in model_input):
-        print('params is not in request... exiting...')
-        raise ValueError("params is required")
-
-    # see if valid controlnet config 
-    # controlnet modules 
-    cn_module_availability_raw = client.get('/controlnet/module_list')
-    cn_module_availability = cn_module_availability_raw.json().get('module_list', [])
-
-    # controlnet models
-    cn_model_availability_raw = client.get('/controlnet/model_list')
-    cn_model_availability = cn_model_availability_raw.json().get('model_list', [])
-
-    # print('controlnet module availability: ', ', '.join(cn_module_availability))
-    # print('controlnet model availability: ', ', '.join(cn_model_availability))
-
-    if 'alwayson_scripts' in model_input['params']:
-        if 'controlnet' in model_input['params']['alwayson_scripts']:
-            # check if the module is available
-            control_units = model_input['params']['alwayson_scripts']['controlnet']['args']
-            if any(not (s['module'] in cn_module_availability) for s in control_units):
-                raise ValueError("controlnet module is not available")
-            # check if the model is available
-            if any(not (s['model'] in cn_model_availability) for s in control_units):
-                raise ValueError("controlnet model is not available")
-
-    params = model_input['params']
-
-    # sort out our base params
-    # default to 512x512 if not specified (SD 1.5)
-    if 'width' not in params:
-        params['width'] = 512
-    if 'height' not in params:
-        params['height'] = 512
-
-    if 'model_url' in model_input:
-        print('loading model from url', model_input['model_url'])
-        # download model
-        load_model_by_url(model_input['model_url'])
-
-    # read the video file
-    tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
-    frame_dir = os.path.join(run_asset_dir, frames_raw_folder)
-    os.makedirs(frame_dir)
-    # split video file into frames
-    video_frame_dir = split_video_frames(tmp_video_path, frame_dir, fps=default_fps)
-
-    reference_imgs = [os.path.join(frame_dir, x) for x in
-                      sorted(os.listdir(frame_dir), key=numerical_part)]
-    
-    if len(reference_imgs) > 2000:
-        raise ValueError(f"too many frames in video - must be less than 2000 at 30FPS (received {len(reference_imgs)})")    
-
-    return model_input
-
 """
 API request body:
 {
@@ -317,6 +252,7 @@ API request body:
     "save_image_samples": 1,  # saves a sample image every N frames (Optional)
     "save_video_samples": 1,  # saves a sample video every N frames (Optional)
     "model_url": "https://huggingface.co/Superlore/toolguru-modi-sd15/blob/main/ToolGuru7ModernDisney_5760_lora-002-001.safetensors",  # (Optional)
+    "bucket_output_folder": "newton", # (Optional) where you will find your output files 
     "params": {
         "prompt": "a beautiful woman",
         "negative_prompt": "",
@@ -355,8 +291,88 @@ Notes:
     1 or "Scale to Fit (Inner Fit)" : scale and crop to fit smallest dimension. preserves proportions.
     2 or "Envelope (Outer Fit)" : scale to fit largest dimension. preserves proportions
 """
-async def inference(run_id, run_asset_dir, model_input):
+async def inference(run_id, run_asset_dir, request):
     global client
+        
+    body = await request.body()
+    model_input = json.loads(body)
+
+    #############################################
+    # Form Validation ###########################
+    #############################################
+
+    if not ('video_file' in model_input):
+        print('video_file is not in request... exiting...')
+        raise ValueError("video_file is required")
+
+    if not ("params" in model_input):
+        print('params is not in request... exiting...')
+        raise ValueError("params is required")
+    
+    if not ("bucket_output_folder" in model_input):
+        print('bucket_output_folder is not in request... exiting...')
+        raise ValueError("bucket_output_folder is required")
+    
+    if not is_valid_bucket_folder_name(model_input['bucket_output_folder']):
+        print('bucket_output_folder is not valid... exiting...')
+        raise ValueError("bucket_output_folder is not valid")
+    
+    output_bucket_path = f"{model_input['bucket_output_folder']}/{run_id}"
+    
+    # see if valid controlnet config 
+    # controlnet modules 
+    cn_module_availability_raw = client.get('/controlnet/module_list')
+    cn_module_availability = cn_module_availability_raw.json().get('module_list', [])
+
+    # controlnet models
+    cn_model_availability_raw = client.get('/controlnet/model_list')
+    cn_model_availability = cn_model_availability_raw.json().get('model_list', [])
+
+    if 'alwayson_scripts' in model_input['params']:
+        if 'controlnet' in model_input['params']['alwayson_scripts']:
+            # check if the module is available
+            control_units = model_input['params']['alwayson_scripts']['controlnet']['args']
+            if any(not (s['module'] in cn_module_availability) for s in control_units):
+                raise ValueError("controlnet module is not available")
+            # check if the model is available
+            if any(not (s['model'] in cn_model_availability) for s in control_units):
+                raise ValueError("controlnet model is not available")
+
+    params = model_input['params']
+
+    # sort out our base params
+    # default to 512x512 if not specified (SD 1.5)
+    if 'width' not in params:
+        params['width'] = 512
+    if 'height' not in params:
+        params['height'] = 512
+
+    if 'model_url' in model_input:
+        print('loading model from url', model_input['model_url'])
+        # download model
+        load_model_by_url(model_input['model_url'])
+
+    #############################################
+    # Video Preprocess ##########################
+    #############################################
+
+    # read the video file
+    tmp_video_path = download_video(model_input['video_file'], run_asset_dir)
+    source_frame_dir = os.path.join(run_asset_dir, frames_raw_folder)
+    os.makedirs(source_frame_dir)
+    # split video file into frames
+    split_video_frames(tmp_video_path, source_frame_dir, fps=default_fps)
+
+    reference_imgs = [os.path.join(source_frame_dir, x) for x in
+                    sorted(os.listdir(source_frame_dir), key=numerical_part)]
+    
+    if len(reference_imgs) > 2000:
+        raise ValueError(f"too many frames in video - must be less than 2000 at 30FPS (received {len(reference_imgs)})")    
+
+    #############################################
+    # Script logic ##############################
+    #############################################
+
     if not ("loopback_souce" in model_input):
         loopback_souce = 'PreviousFrame'
     else:
@@ -367,7 +383,6 @@ async def inference(run_id, run_asset_dir, model_input):
 
     params = model_input['params']
 
-    source_frame_dir = os.path.join(run_asset_dir, frames_raw_folder)
     frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
     video_dir = os.path.join(run_asset_dir, video_folder)
     if not os.path.isdir(frame_dir):
@@ -381,16 +396,12 @@ async def inference(run_id, run_asset_dir, model_input):
     third_image_index = 0
     history = []
 
-    reference_imgs = [os.path.join(source_frame_dir, x) for x in
-                      sorted(os.listdir(source_frame_dir), key=numerical_part)]
-
     print(f'starting inference... processing {len(reference_imgs)} images')
 
     loops = len(reference_imgs)
 
-
     for i in range(loops):
-        if i > 6:
+        if i > 10:
             # TODO: remove after dev
             print('DEV BREAKING EARLY')
             break 
@@ -502,16 +513,16 @@ async def inference(run_id, run_asset_dir, model_input):
         # dev save image locally + upload to google storage
         if generate_samples:
             g_sample_filename_local = os.path.join(frame_dir, f'grid_{i}.png')
-            g_sample_filename_output_path = f'{run_id}/{animation_frame_folder}/grid_{i}.png'
+            g_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/grid_{i}.png'
             processed_image.save(g_sample_filename_local)
             write_to_gcp(g_sample_filename_local, g_sample_filename_output_path)
             f_sample_filename_local = os.path.join(frame_dir, f'frame_{i}.png')
-            f_sample_filename_output_path = f'{run_id}/{animation_frame_folder}/frame_{i}.png'
+            f_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/frame_{i}.png'
             init_img.save(f_sample_filename_local)
             write_to_gcp(f_sample_filename_local, f_sample_filename_output_path)
         if generate_video_sample: 
             output_video_local_path = create_video(frame_dir, os.path.join(video_dir, 'Sample-{i:04d}.mp4'), default_fps)
-            output_video_sample_path = f'{run_id}/{video_folder}/Sample-{i:04d}.mp4'
+            output_video_sample_path = f'${output_bucket_path}/{video_folder}/Sample-{i:04d}.mp4'
             write_to_gcp(output_video_local_path, output_video_sample_path)
 
         # Sort out the third_frame_image
@@ -526,8 +537,6 @@ async def inference(run_id, run_asset_dir, model_input):
 
         history.append(init_img)
 
-    print('done! no errors')
-
-    return {"done": True}
+    return {"status": "success", "message": "done", "bucket_path": output_bucket_path}
 
 on_app_started(register_endpoints)
