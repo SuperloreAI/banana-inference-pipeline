@@ -17,6 +17,7 @@ import json
 from app import load_model_by_url
 import asyncio
 import re
+import datetime
 
 client = None
 
@@ -101,24 +102,27 @@ def split_video_frames(video_file, output_dir, fps=30):
     return output_dir
 
 
-def create_video(frames_dir, output_dir, fps=30):
+def create_video(frames_dir, output_file, fps=30):
     # Validate the input parameters
     if not os.path.isdir(frames_dir):
         raise ValueError(f'{frames_dir} is not a valid directory')
-    if not os.path.isdir(output_dir):
-        raise ValueError(f'{output_dir} is not a valid directory')
+    if not os.path.isdir(os.path.dirname(output_file)):
+        raise ValueError(f'{os.path.dirname(output_file)} is not a valid directory')
     if not isinstance(fps, int) or fps <= 0:
         raise ValueError(f'fps must be a positive integer value')
 
     # Create the temporary directory if it doesn't exist
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    print('check if path exist?', os.path.dirname(output_file))
+    print('does the fucking path exist? ', os.path.exists(os.path.dirname(output_file)))
+    if not os.path.exists(os.path.dirname(output_file)):
+        print("making the FUCKING PATH ", os.makedirs(os.path.dirname(output_file)))
+        os.makedirs(os.path.dirname(output_file))
 
     # Define the command to create a video from the frames
     # Important: Be sure to sanitize all inputs
     print('calling ffmpeg on video frames')
-    output_file = shlex.quote(os.path.join(output_dir, 'output.mp4'))
-    cmd = f'ffmpeg -r {fps} -i {shlex.quote(os.path.join(frames_dir, frame_wildcard))} -c:v libx264 -crf 25 -profile:v high -pix_fmt yuv420p {output_file}'
+    cmd = f'ffmpeg -r {fps} -i {shlex.quote(os.path.join(frames_dir, frame_wildcard))} -c:v libx264 -crf 25 -profile:v high -pix_fmt yuv420p "{shlex.quote(output_file)}"'
+    print('cmd', cmd)
 
     # Execute the command using subprocess
     subprocess.call(cmd, shell=True)
@@ -224,7 +228,7 @@ async def inference_handler(request: Request):
 
         try:
             anim_frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
-            if os.listdir(anim_frame_dir) > 0:
+            if len(os.listdir(anim_frame_dir)) > 0:
                 print('generating video from frames')
                 video_dir = os.path.join(run_asset_dir, video_folder)
                 video_file_local_path = create_video(anim_frame_dir, video_dir, default_fps)
@@ -249,6 +253,7 @@ API request body:
 {
     "video_file": "https://storage.googleapis.com/superlore-video-sources-738437/demo-man.mp4",
     "loopback_souce": "PreviousFrame", # (Optional)
+    "max_frames": 10,  # only process a sample -> leave out to process the whole video
     "save_image_samples": 1,  # saves a sample image every N frames (Optional)
     "save_video_samples": 1,  # saves a sample video every N frames (Optional)
     "model_url": "https://huggingface.co/Superlore/toolguru-modi-sd15/blob/main/ToolGuru7ModernDisney_5760_lora-002-001.safetensors",  # (Optional)
@@ -317,7 +322,10 @@ async def inference(run_id, run_asset_dir, request):
         print('bucket_output_folder is not valid... exiting...')
         raise ValueError("bucket_output_folder is not valid")
     
-    output_bucket_path = f"{model_input['bucket_output_folder']}/{run_id}"
+    video_file_name, _ = os.path.splitext(os.path.basename(model_input['video_file']))
+    current_date = datetime.datetime.now().date()
+    formatted_date = current_date.strftime("%m_%d_%Y")
+    output_bucket_path = f"{model_input['bucket_output_folder']}/{video_file_name}-{formatted_date}/{run_id}"
     
     # see if valid controlnet config 
     # controlnet modules 
@@ -347,11 +355,6 @@ async def inference(run_id, run_asset_dir, request):
     if 'height' not in params:
         params['height'] = 512
 
-    if 'model_url' in model_input:
-        print('loading model from url', model_input['model_url'])
-        # download model
-        load_model_by_url(model_input['model_url'])
-
     #############################################
     # Video Preprocess ##########################
     #############################################
@@ -368,6 +371,15 @@ async def inference(run_id, run_asset_dir, request):
     
     if len(reference_imgs) > 2000:
         raise ValueError(f"too many frames in video - must be less than 2000 at 30FPS (received {len(reference_imgs)})")    
+    
+    #############################################
+    # Load model ################################
+    #############################################
+
+    # if 'model_url' in model_input:
+    #     print('loading model from url', model_input['model_url'])
+    #     # download model
+    #     load_model_by_url(model_input['model_url'])
 
     #############################################
     # Script logic ##############################
@@ -401,9 +413,9 @@ async def inference(run_id, run_asset_dir, request):
     loops = len(reference_imgs)
 
     for i in range(loops):
-        if i > 10:
+        if "max_frames" in model_input and isinstance(model_input['max_frames'], int) and i > model_input['max_frames']:
             # TODO: remove after dev
-            print('DEV BREAKING EARLY')
+            print('done')
             break 
 
         print(f'processing frame {i + 1} of {loops}')
@@ -482,7 +494,6 @@ async def inference(run_id, run_asset_dir, request):
                 frame_params['mask'] = b64_encode(latent_mask)
                 frame_params['init_images'] = [b64_encode(img) for img in init_images]
         else:
-            print('first frame....')
             # first frame - we use txt2img
             endpoint = 'txt2img'
 
@@ -507,22 +518,24 @@ async def inference(run_id, run_asset_dir, request):
         init_img = processed_image
         if (i > 0):
             init_img = init_img.crop((initial_width, 0, initial_width * 2, height))
+        
+        # save the file
+        local_animation_frame_file = os.path.join(frame_dir, f'Frame-{i:05d}.png')
+        init_img.save(local_animation_frame_file)
 
-        generate_samples = save_image_samples > 0 and i % save_image_samples == 0
-        generate_video_sample = save_video_samples > 0 and i % save_video_samples == 0
+        generate_samples = save_image_samples > 0 and (i + 1) % save_image_samples == 0
+        generate_video_sample = save_video_samples > 0 and (i + 1) % save_video_samples == 0
         # dev save image locally + upload to google storage
         if generate_samples:
-            g_sample_filename_local = os.path.join(frame_dir, f'grid_{i}.png')
-            g_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/grid_{i}.png'
+            g_sample_filename_local = os.path.join(frame_dir, f'Grid-{i:05d}.png')
+            g_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/Grid-{i:05d}.png'
             processed_image.save(g_sample_filename_local)
             write_to_gcp(g_sample_filename_local, g_sample_filename_output_path)
-            f_sample_filename_local = os.path.join(frame_dir, f'frame_{i}.png')
-            f_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/frame_{i}.png'
-            init_img.save(f_sample_filename_local)
-            write_to_gcp(f_sample_filename_local, f_sample_filename_output_path)
+            f_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/Frame-{i:05d}.png'
+            write_to_gcp(local_animation_frame_file, f_sample_filename_output_path)
         if generate_video_sample: 
-            output_video_local_path = create_video(frame_dir, os.path.join(video_dir, 'Sample-{i:04d}.mp4'), default_fps)
-            output_video_sample_path = f'${output_bucket_path}/{video_folder}/Sample-{i:04d}.mp4'
+            output_video_local_path = create_video(frame_dir, os.path.join(video_dir, f'Sample-{i:05d}.mp4'), default_fps)
+            output_video_sample_path = f'{output_bucket_path}/{video_folder}/Sample-{i:05d}.mp4'
             write_to_gcp(output_video_local_path, output_video_sample_path)
 
         # Sort out the third_frame_image
@@ -536,6 +549,11 @@ async def inference(run_id, run_asset_dir, request):
         # TODO: support historical 3rd frame etc...
 
         history.append(init_img)
+
+    output_video_sample_path = f'{output_bucket_path}/{video_folder}/animation_video.mp4'
+    print('writting output video', output_video_sample_path)
+    output_video_local_path = create_video(frame_dir, os.path.join(video_dir, 'animation_video.mp4'), default_fps)
+    write_to_gcp(output_video_local_path, output_video_sample_path)
 
     return {"status": "success", "message": "done", "bucket_path": output_bucket_path}
 
