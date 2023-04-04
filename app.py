@@ -40,7 +40,7 @@ def load_model_by_url(url):
     hash_object = hashlib.md5(url.encode())
     md5_hash = hash_object.hexdigest()
 
-    from download_checkpoint import download
+    from download_models import download
     download(url, md5_hash)
 
     modules.sd_models.list_models = list_models
