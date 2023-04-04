@@ -37,18 +37,19 @@ default_fps = 30
 secret_data = json.loads(secret_json_data.replace('\n', '\\n'))
 
 # gcp_client = storage.Client.from_service_account_json(secret_file)
-gcp_client = storage.Client.from_service_account_info(secret_data)
+# gcp_client = storage.Client.from_service_account_info(secret_data)
 
 
 def write_to_gcp(local_filepath, output_filepath, bucket_name=output_bucket):
     # # Get a bucket object
-    bucket = gcp_client.get_bucket(bucket_name)
+    # bucket = gcp_client.get_bucket(bucket_name)
 
-    # Create a blob object for the file
-    blob = bucket.blob(output_filepath)
+    # # Create a blob object for the file
+    # blob = bucket.blob(output_filepath)
 
-    # Upload the file to the bucket
-    blob.upload_from_filename(local_filepath)
+    # # Upload the file to the bucket
+    # blob.upload_from_filename(local_filepath)
+    return
 
 def healthcheck():
     gpu = False
