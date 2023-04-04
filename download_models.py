@@ -28,7 +28,7 @@ def check_model_file(filename):
     # if file_size_mb < 100:
     #     print(f'The downloaded file is only {file_size_mb} MB and does not appear to be a valid model.')
     #     sys.exit(1)
-    pass
+    return
 
 def download_hf_file(model_url, HF_TOKEN, id="model", path="models/Stable-diffusion/"):
     filename = get_filename(model_url, id, path)
@@ -74,41 +74,40 @@ def download(url, id="model", path="models/Stable-diffusion/"):
         download_other_file(url, id, path)
 
 if __name__ == '__main__':
-    # download(MODEL_URL, "model", "models/Stable-diffusion/")
-    # for i, url in enumerate(CONTROLNET_MODEL_URLS):
-    #     print('Downloading controlnet model', i, url)
-    #     # Model name becomes the model ID
-    #     # Get the filename with extension from the URL
-    #     filename_with_ext = os.path.basename(urlparse(url).path)
+    download(MODEL_URL, "model", "models/Stable-diffusion/")
+    for i, url in enumerate(CONTROLNET_MODEL_URLS):
+        print('Downloading controlnet model', i, url)
+        # Model name becomes the model ID
+        # Get the filename with extension from the URL
+        filename_with_ext = os.path.basename(urlparse(url).path)
 
-    #     # Get the filename without extension
-    #     filename_without_ext, _ = os.path.splitext(filename_with_ext)
-    #     download(url, filename_without_ext, path="models/ControlNet/")
-    # for i, url in enumerate(OPENPOSE_MODEL_URLS):
-    #     print('Downloading openpose model', i, url)
-    #     # Model name becomes the model ID
-    #     # Get the filename with extension from the URL
-    #     filename_with_ext = os.path.basename(urlparse(url).path)
+        # Get the filename without extension
+        filename_without_ext, _ = os.path.splitext(filename_with_ext)
+        download(url, filename_without_ext, path="models/ControlNet/")
+    for i, url in enumerate(OPENPOSE_MODEL_URLS):
+        print('Downloading openpose model', i, url)
+        # Model name becomes the model ID
+        # Get the filename with extension from the URL
+        filename_with_ext = os.path.basename(urlparse(url).path)
 
-    #     # Get the filename without extension
-    #     filename_without_ext, _ = os.path.splitext(filename_with_ext)
-    #     download(url, filename_without_ext, path="models/openpose/")
-    # for i, url in enumerate(HED_URLS):
-    #     print('Downloading hed model', i, url)
-    #     # Model name becomes the model ID
-    #     # Get the filename with extension from the URL
-    #     filename_with_ext = os.path.basename(urlparse(url).path)
+        # Get the filename without extension
+        filename_without_ext, _ = os.path.splitext(filename_with_ext)
+        download(url, filename_without_ext, path="models/openpose/")
+    for i, url in enumerate(HED_URLS):
+        print('Downloading hed model', i, url)
+        # Model name becomes the model ID
+        # Get the filename with extension from the URL
+        filename_with_ext = os.path.basename(urlparse(url).path)
 
-    #     # Get the filename without extension
-    #     filename_without_ext, _ = os.path.splitext(filename_with_ext)
-    #     download(url, filename_without_ext, path="models/hed/")
-    # for i, url in enumerate(DEPTH_LERES_MODEL_URLS):
-    #     print('Downloading depth leres model', i, url)
-    #     # Model name becomes the model ID
-    #     # Get the filename with extension from the URL
-    #     filename_with_ext = os.path.basename(urlparse(url).path)
+        # Get the filename without extension
+        filename_without_ext, _ = os.path.splitext(filename_with_ext)
+        download(url, filename_without_ext, path="models/hed/")
+    for i, url in enumerate(DEPTH_LERES_MODEL_URLS):
+        print('Downloading depth leres model', i, url)
+        # Model name becomes the model ID
+        # Get the filename with extension from the URL
+        filename_with_ext = os.path.basename(urlparse(url).path)
 
-    #     # Get the filename without extension
-    #     filename_without_ext, _ = os.path.splitext(filename_with_ext)
-    #     download(url, filename_without_ext, path="models/leres/")
-    pass
+        # Get the filename without extension
+        filename_without_ext, _ = os.path.splitext(filename_with_ext)
+        download(url, filename_without_ext, path="models/leres/")
