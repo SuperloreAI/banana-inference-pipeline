@@ -332,12 +332,29 @@ async def inference(run_id, run_asset_dir, request):
 
     params = model_input['params']
 
-    # sort out our base params
+    # Default some params that are important if not included in the request
+
     # default to 512x512 if not specified (SD 1.5)
     if 'width' not in params:
         params['width'] = 512
     if 'height' not in params:
         params['height'] = 512
+    if 'inpainting_fill' not in params:
+        params['inpainting_fill'] = 1
+    if 'initial_noise_multiplier' not in params:
+        params['initial_noise_multiplier'] = 1
+    if 'inpaint_full_res' not in params:
+        params['inpaint_full_res'] = 0
+    if 'inpaint_full_res_padding' not in params:
+        params['inpaint_full_res_padding'] = 0
+    
+    # for each controlnet unit, we should set guess_mode = False
+    if 'alwayson_scripts' in params and 'controlnet' in params['alwayson_scripts']:
+        for ii in range(len(params['alwayson_scripts']['controlnet']['args'])):
+            if not isinstance(params['alwayson_scripts']['controlnet']['args'][ii], dict):
+                continue
+            if 'guess_mode' not in params['alwayson_scripts']['controlnet']['args'][ii]:
+                params['alwayson_scripts']['controlnet']['args'][ii]['guess_mode'] = False
 
     #############################################
     # Video Preprocess ##########################
@@ -376,8 +393,6 @@ async def inference(run_id, run_asset_dir, request):
 
     save_image_samples = model_input.get('save_image_samples', -1)
     save_video_samples = model_input.get('save_video_samples', -1)
-
-    params = model_input['params']
 
     frame_dir = os.path.join(run_asset_dir, animation_frame_folder)
     video_dir = os.path.join(run_asset_dir, video_folder)
@@ -448,6 +463,7 @@ async def inference(run_id, run_asset_dir, request):
 
                 frame_params['mask'] = b64_encode(latent_mask)
                 frame_params['init_images'] = [b64_encode(img) for img in init_images]
+                frame_params['width'] = working_width
             else:
                 # 2 frame comparison
                 working_width = initial_width * 2
@@ -477,12 +493,14 @@ async def inference(run_id, run_asset_dir, request):
 
                 frame_params['mask'] = b64_encode(latent_mask)
                 frame_params['init_images'] = [b64_encode(img) for img in init_images]
+                frame_params['width'] = working_width
         else:
             # first frame - we use txt2img
             endpoint = 'txt2img'
 
             latent_mask = Image.new("RGB", (initial_width, height), "white")
             frame_params['mask'] = b64_encode(latent_mask)
+            frame_params['width'] = initial_width
 
             # add the control net inputs
             if 'alwayson_scripts' in frame_params and 'controlnet' in frame_params['alwayson_scripts']:
