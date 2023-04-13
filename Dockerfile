@@ -91,4 +91,4 @@ ADD script.py extensions/banana/scripts/banana.py
 ADD app.py app.py
 ADD server.py server.py
 
-CMD ["python", "server.py", "--xformers", "--listen", "--port", "8000"]
+CMD ["python", "server.py", "--xformers", "--no-hashing", "--listen", "--port", "8000"]
