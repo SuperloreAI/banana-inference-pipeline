@@ -18,6 +18,7 @@ from app import load_model_by_url
 import asyncio
 import re
 import datetime
+import copy
 
 client = None
 
@@ -32,6 +33,12 @@ animation_frame_folder = "animation_frames"
 frames_raw_folder = "frames_raw"
 video_folder = "video"
 default_fps = 30
+base_temporal_config = {
+    "model": "diff_control_sd15_temporalnet_fp16 [adc6bd97]",
+    "module": "none",
+    "weight": 1,
+    "guidance": 1,
+}
 
 # Parse the JSON data
 secret_data = json.loads(secret_json_data.replace('\n', '\\n'))
@@ -267,6 +274,13 @@ API request body:
                         "guidance_end": 1,
                         "threshold_a": 100,
                         "threshold_b": 200,
+                    },
+                    {
+                        "input_image": "base64...",  # Added in via script
+                        "model": "diff_control_sd15_temporalnet_fp16 [adc6bd97]",
+                        "module": "none",
+                        "weight": 1,
+                        "guidance": 1,
                     }
                 ]
             }
@@ -347,6 +361,10 @@ async def inference(run_id, run_asset_dir, request):
         params['inpaint_full_res'] = 0
     if 'inpaint_full_res_padding' not in params:
         params['inpaint_full_res_padding'] = 0
+
+    use_temporal_net = True
+    if 'use_temporal_net' in params:
+        use_temporal_net = params['use_temporal_net']
     
     # for each controlnet unit, we should set guess_mode = False
     if 'alwayson_scripts' in params and 'controlnet' in params['alwayson_scripts']:
@@ -418,7 +436,7 @@ async def inference(run_id, run_asset_dir, request):
             break 
 
         print(f'processing frame {i + 1} of {loops}')
-        frame_params = params.copy()
+        frame_params = copy.deepcopy(params)
         endpoint = 'img2img'
 
         # ref_image = Image.open(reference_imgs[i]).convert("RGB").resize((initial_width, height), Image.ANTIALIAS)
@@ -456,6 +474,18 @@ async def inference(run_id, run_asset_dir, request):
                         if not isinstance(frame_params['alwayson_scripts']['controlnet']['args'][ii], dict):
                             continue
                         frame_params['alwayson_scripts']['controlnet']['args'][ii]['input_image'] = b64_encode(cn_input)
+                    
+                    if use_temporal_net:
+                        # add temporal net inputs
+                        temporal_input = Image.new("RGB", (working_width, height))
+                        temporal_input.paste(init_images[0], (0, 0))
+                        temporal_input.paste(init_images[0], (initial_width, 0))
+                        temporal_input.paste(third_image, (initial_width * 2, 0))
+                        frame_params['alwayson_scripts']['controlnet']['args'].append({
+                          "input_image": b64_encode(temporal_input),  
+                          **base_temporal_config
+                        })
+
 
                 latent_mask = Image.new("RGB", (working_width, height), "black")
                 latent_draw = ImageDraw.Draw(latent_mask)
@@ -481,11 +511,20 @@ async def inference(run_id, run_asset_dir, request):
                 cn_input.paste(open_image(reference_imgs[i - 1], initial_width, height), (0, 0))
                 cn_input.paste(ref_image, (initial_width, 0))
                 if 'alwayson_scripts' in frame_params and 'controlnet' in frame_params['alwayson_scripts']:
-                    control_units = frame_params['alwayson_scripts']['controlnet']['args']
                     for ii in range(len(frame_params['alwayson_scripts']['controlnet']['args'])):
                         if not isinstance(frame_params['alwayson_scripts']['controlnet']['args'][ii], dict):
                             continue
                         frame_params['alwayson_scripts']['controlnet']['args'][ii]['input_image'] = b64_encode(cn_input)
+                    
+                    if use_temporal_net:
+                        # add temporal net inputs
+                        temporal_input = Image.new("RGB", (working_width, height))
+                        temporal_input.paste(init_images[0], (0, 0))
+                        temporal_input.paste(init_images[0], (initial_width, 0))
+                        frame_params['alwayson_scripts']['controlnet']['args'].append({
+                          "input_image": b64_encode(temporal_input),  
+                          **base_temporal_config
+                        })
 
                 latent_mask = Image.new("RGB", (working_width, height), "black")
                 latent_draw = ImageDraw.Draw(latent_mask)

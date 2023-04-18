@@ -9,7 +9,8 @@ ARG CONTROLNET_MODEL_URLS="\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_canny.pth,\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_depth.pth,\
     https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_hed.pth,\
-    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_normal.pth"
+    https://huggingface.co/lllyasviel/ControlNet/blob/main/models/control_sd15_normal.pth,\
+    https://huggingface.co/CiaraRowles/TemporalNet/blob/main/diff_control_sd15_temporalnet_fp16.safetensors"
 
 ARG OPENPOSE_MODEL_URLS="\
     https://huggingface.co/lllyasviel/ControlNet/resolve/main/annotator/ckpts/hand_pose_model.pth,\
@@ -23,9 +24,9 @@ ARG DEPTH_LERES_MODEL_URLS="\
 
 # If you are using a private Huggingface model (sign in required to download) insert your Huggingface
 # access token (https://huggingface.co/settings/tokens) below:
-ARG HF_TOKEN=''
+ARG HF_TOKEN='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'
 
-ARG GCP_SERVICE_ACCOUNT_JSON=''
+ARG GCP_SERVICE_ACCOUNT_JSON='{"type": "service_account", "project_id": "superlore-demo", "private_key_id": "892e164b068652a2587cfeb6a2a08a2b5877f50a", "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC5vMw9rwGQTl3i\nSXJbuXEOWv/Zk88SCnkuXmSNNynZl9ncrg0RBEZHglo5S0LryUbZ0Y7APcwXQBWX\nvGSTY1deDlqyY9dvRPe51sEvuGmbHiVB00FltwSbwRIuI8t2PLHOIcayX/Kgfi5z\nUavosWE5xbp0HzNSlbVUaczmpYYbFrsRmgl3A41M+bFtbgybjXzlb7+QCNWdrfyW\n0Ucg6Q74Ao6k2Vs1F161N5i5L2x3UXvwyCZeedwChrZwVAMBCnVoX8oc4rGFo+MY\nKRjcLK7lHUw0ZH3m/iMaSN+t3sjHUkOoVdBw4XtN5S1Ua7FNRcZLRDa3pZASixYi\nQiiWs5EXAgMBAAECggEACXdBwXMF1WDpD/tGRL5ysJSarXAHAZhfDKnq3feNvnUq\nuUB1kgRxwHs4NetMAdBEOB2h9NIxcI3ni9AiIBDUBwscPDMya41MQsBbIB954lnq\n9CvcDV8CcR2p24gfemsldKfsBHM3Xk6P93iWFknT9qnJEtn0N6VBlIe/1ZFiAEdV\n3O3nyoEKIl/4ifCGagm4RyGwyeyGlM70m7k3BOAFFCO/YR2rxnnQyHJ885WlBDsq\nM2cYJr/9AdQgwgDPxQWNy0OSwe1lD8lgTteQhDS693uHnTZc9qp7gLAclY2DAfHS\nk/XvTlR5VM8yykXBsxfZtEuGJZxNbQtwo6/TR1BTgQKBgQD5GdpHxX9RMIyidGMl\nvbjDklUfFc0nPxLF7lqu3cven0hlo2l9rfCywo6dDWUbBlHxlXRX//jgbjKPURZ3\nLW7SHpIOOZPHaJyFDGotnjE/oVwpT2lLf+DP+dVnKTRplka5lCI1vRIXiaLnE35+\n3zIv9bZbBfiVcSKFgW+w1RAa8QKBgQC+4bFKtNNJCFYl0gZGobrLCplA2hgUDdsu\ne0FYVPg/qejMWadKDGT3Md9yxkOuMYVVHtSbVZokN1iNqk9/uqxIyFG3yYsVQGfv\nWe9op1o7veQoDK+cGKu4q6vJBeJvLP7t47i4HUr4XOYFwfUrnrR79OKYdu4Mnam9\nJnVYPnMchwKBgQDGwvcmD5Ogb/G3atD1+2VjP+8Fx7qT10Mehir7nuSedVAqMXLq\nIpGNwapT7K1BHBDkiFF2KjwmsCdNrfEUFT95D4WRLiYZlgJWM2rBjZlUYWeNWtz0\nrkvvBzVdhEZa/drfFzEY2g2GlH9UjHyBtYxxMklYZfJNJCHcj0RUwB2CsQKBgA8p\nsoGyt433oZBDjMgTlNkIMIBcUslVCHI6zEgOB+JWxu1kuctCDMsuJQfjBAFUYbkP\nR+hG9oWl99zZCJOm6oSllQg6dFft09PJmyD/GkXgob0ktNZ7hziWOoEvfHtEYcPX\n8RZ/DTOJfaQ7chRS+RdXrqBZ4jMSWydxZKTr4Q0FAoGAe1KMroRhiHNeYtIMZwPP\ny0lgdJuxQzFN3B9qdR9HK/4+LM9pSvj9QTgBdsZaEBLUSiqUTToCrWfNVZmtCkdP\nwtLHgLLoCq0p1/SZgj3dAURl8T1Zww55LIKt7J2E+htNOReWQNJMqmoY3tY3WMcs\n9FbvqUm2K8cVr5O6bAldZKc=\n-----END PRIVATE KEY-----\n", "client_email": "inference-machines@superlore-demo.iam.gserviceaccount.com", "client_id": "101934595030530880425", "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/inference-machines%40superlore-demo.iam.gserviceaccount.com"}'
 
 RUN apt update && apt-get -y install git wget \
     python3.10 python3.10-venv python3-pip \
