@@ -232,6 +232,9 @@ async def inference_handler(request: Request):
 
     return result
 
+def build_output_bucket_path(bucket_output_folder, user_id, run_id):
+    return f"{bucket_output_folder}/{user_id}/{run_id}"
+
 """
 API request body:
 {
@@ -242,6 +245,7 @@ API request body:
     "save_video_samples": 1,  # saves a sample video every N frames (Optional)
     "model_url": "https://huggingface.co/Superlore/toolguru-modi-sd15/blob/main/ToolGuru7ModernDisney_5760_lora-002-001.safetensors",  # (Optional)
     "bucket_output_folder": "newton", # (Optional) where you will find your output files 
+
     "params": {
         "prompt": "a beautiful woman",
         "negative_prompt": "",
@@ -306,10 +310,13 @@ async def inference(run_id, run_asset_dir, request):
         print('bucket_output_folder is not valid... exiting...')
         raise ValueError("bucket_output_folder is not valid")
     
+    if not ("user_id" in model_input):
+        print('user_id is not in request... exiting...')
+        raise ValueError("user_id is required")
+
     video_file_name, _ = os.path.splitext(os.path.basename(model_input['video_file']))
-    current_date = datetime.datetime.now().date()
-    formatted_date = current_date.strftime("%m_%d_%Y")
-    output_bucket_path = f"{model_input['bucket_output_folder']}/{video_file_name}-{formatted_date}/{run_id}"
+    video_id = model_input["video_id"] if "video_id" in model_input else video_file_name
+    gbucket_run_id = model_input["run_id"] if "run_id" in model_input else run_id
     
     # see if valid controlnet config 
     # controlnet modules 
@@ -530,14 +537,17 @@ async def inference(run_id, run_asset_dir, request):
         # dev save image locally + upload to google storage
         if generate_samples:
             g_sample_filename_local = os.path.join(frame_dir, f'Grid-{i:05d}.png')
-            g_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/Grid-{i:05d}.png'
+            _g_sample_filename_output_path = build_output_bucket_path(model_input["bucket_output_folder"], model_input["user_id"], gbucket_run_id)
+            g_sample_filename_output_path = f"{_g_sample_filename_output_path}/{animation_frame_folder}/Grid-{i:05d}.png"
             processed_image.save(g_sample_filename_local)
             write_to_gcp(g_sample_filename_local, g_sample_filename_output_path)
-            f_sample_filename_output_path = f'{output_bucket_path}/{animation_frame_folder}/Frame-{i:05d}.png'
+            _f_sample_filename_output_path = build_output_bucket_path(model_input["bucket_output_folder"], model_input["user_id"], gbucket_run_id)
+            f_sample_filename_output_path = f"{_f_sample_filename_output_path}/{animation_frame_folder}/Frame-{i:05d}.png"
             write_to_gcp(local_animation_frame_file, f_sample_filename_output_path)
         if generate_video_sample: 
             output_video_local_path = create_video(frame_dir, os.path.join(video_dir, f'Sample-{i:05d}.mp4'), default_fps)
-            output_video_sample_path = f'{output_bucket_path}/{video_folder}/Sample-{i:05d}.mp4'
+            _output_video_sample_path = build_output_bucket_path(model_input["bucket_output_folder"], model_input["user_id"], gbucket_run_id)
+            output_video_sample_path = f"{_output_video_sample_path}/{video_folder}/Sample-{i:05d}.mp4"
             write_to_gcp(output_video_local_path, output_video_sample_path)
 
         # Sort out the third_frame_image
@@ -552,7 +562,9 @@ async def inference(run_id, run_asset_dir, request):
 
         history.append(init_img)
 
-    output_video_sample_path = f'{output_bucket_path}/{video_folder}/animation_video.mp4'
+    # output_video_sample_path = f'{output_bucket_path}/{video_folder}/animation_video.mp4'
+    _output_video_sample_path = build_output_bucket_path(model_input["bucket_output_folder"], model_input["user_id"], gbucket_run_id)
+    output_video_sample_path = f"{_output_video_sample_path}/{video_id}-animation.mp4"
     print('writting output video', output_video_sample_path)
     output_video_local_path = create_video(frame_dir, os.path.join(video_dir, 'animation_video.mp4'), default_fps)
     write_to_gcp(output_video_local_path, output_video_sample_path)
